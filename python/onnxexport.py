@@ -27,35 +27,30 @@ print(input_ids.shape)
 
 # 3. Wrap Sam3Model so the ONNX graph has clean inputs/outputs
 class Sam3ONNXWrapper(torch.nn.Module):
-    def __init__(self, sam3, input_ids, attention_mask):
+    def __init__(self, sam3):
         super().__init__()
         self.sam3 = sam3
-        self.register_buffer("const_input_ids", input_ids.to(torch.int64).cpu())
-        self.register_buffer("const_attention_mask", attention_mask.to(torch.int64).cpu())
 
-    def forward(self, pixel_values):
+    def forward(self, pixel_values, input_ids, attention_mask):
         outputs = self.sam3(
             pixel_values=pixel_values,
-            input_ids=self.const_input_ids,
-            attention_mask=self.const_attention_mask,
-        )
-        # Typical useful outputs
-        instance_masks = torch.sigmoid(outputs.pred_masks)  # [B, Q, H, W]
-        semantic_seg = outputs.semantic_seg                 # [B, 1, H, W]
-        return outputs.pred_masks, outputs.semantic_seg # instance_masks, semantic_seg
+            input_ids=input_ids,
+            attention_mask=attention_mask)
+        
+        return outputs.pred_masks, outputs.semantic_seg
 
-wrapper = Sam3ONNXWrapper(model, input_ids, attention_mask).to(device).eval()
+wrapper = Sam3ONNXWrapper(model).to(device).eval()
 
 # 5. Export to ONNX
 output_dir = Path(f"onnx_weights")
 output_dir.mkdir(exist_ok=True)
-onnx_path = str(output_dir / f"sam3_static.onnx")
+onnx_path = str(output_dir / f"sam3_dynamic.onnx")
 
 torch.onnx.export(
     wrapper,
-    (pixel_values),
+    (pixel_values, input_ids, attention_mask),
     onnx_path,
-    input_names=["pixel_values"],
+    input_names=["pixel_values", "input_ids", "attention_mask"],
     output_names=["instance_masks", "semantic_seg"],
     dynamo=False,
     opset_version=17,
