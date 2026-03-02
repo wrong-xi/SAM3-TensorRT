@@ -43,6 +43,8 @@ public:
     bool infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type);
     bool run_blind_inference();
     void pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat);
+    // void get_input_sizes()
+    void set_prompt(std::vector<int64_t>& input_ids, std::vector<int64_t>& input_attention_mask);
     std::vector<void*> output_cpu;
 
 private:
@@ -54,6 +56,7 @@ private:
 
     std::vector<void*> input_cpu;
     std::vector<void*> input_gpu;
+    int image_index=0;
 
     std::vector<void*> output_gpu;
     std::vector<size_t>output_sizes;

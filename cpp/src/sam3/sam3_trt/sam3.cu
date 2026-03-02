@@ -156,7 +156,7 @@ bool SAM3_PCS::infer_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALI
 
     pre_process_sam3<<<gsize, bsize, 0, sam3_stream>>>(
         static_cast<uint8_t*>(opencv_input),
-        static_cast<float*>(input_gpu[0]),
+        static_cast<float*>(input_gpu[image_index]),
         input.cols,
         input.rows,
         input.channels(),
@@ -177,7 +177,7 @@ bool SAM3_PCS::infer_on_iGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALI
 
     pre_process_sam3<<<gsize, bsize, 0, sam3_stream>>>(
         zc_input,
-        static_cast<float*>(input_gpu[0]),
+        static_cast<float*>(input_gpu[image_index]),
         input.cols,
         input.rows,
         input.channels(),
@@ -314,6 +314,7 @@ void SAM3_PCS::allocate_io_buffers()
             {
                 in_width = dims.d[3];
                 in_height= dims.d[2];
+                image_index = input_cpu.size() - 1;
                 std::cout << "Input image has dimensions " 
                     << in_width
                     << " x "
@@ -339,6 +340,51 @@ void SAM3_PCS::allocate_io_buffers()
                 << std::endl;
         }
 
+    }
+}
+
+void SAM3_PCS::set_prompt(std::vector<int64_t>& input_ids, 
+    std::vector<int64_t>& input_attention_mask)
+{
+    auto iid_obj = std::find(_input_names.begin(), _input_names.end(), "input_ids");
+    auto iam_obj = std::find(_input_names.begin(), _input_names.end(), "attention_mask");
+
+    if (iid_obj==_input_names.end())
+    {
+        throw std::runtime_error("input_ids not found in input names, seems to be a bug");
+    }
+
+    if (iam_obj==_input_names.end())
+    {
+        throw std::runtime_error("attention_mask not found in input names, seems to be a bug");
+    }
+
+    int iid_idx = std::distance(_input_names.begin(), iid_obj);
+    int iam_idx = std::distance(_input_names.begin(), iam_obj);
+
+    std::memcpy((int64_t *)input_cpu[iid_idx], 
+        input_ids.data(), 
+        input_ids.size()*sizeof(int64_t));
+
+    std::memcpy((int64_t *)input_cpu[iam_idx], 
+        input_attention_mask.data(), 
+        input_attention_mask.size()*sizeof(int64_t));
+    
+    if (!is_zerocopy)
+    {
+        cudaMemcpyAsync(input_gpu[iid_idx],
+            input_cpu[iid_idx],
+            input_ids.size()*sizeof(int64_t), 
+            cudaMemcpyHostToDevice, 
+            sam3_stream);
+        
+        cudaMemcpyAsync(input_gpu[iam_idx],
+            input_cpu[iam_idx],
+            input_attention_mask.size()*sizeof(int64_t), 
+            cudaMemcpyHostToDevice, 
+            sam3_stream);
+        
+        cudaStreamSynchronize(sam3_stream);
     }
 }
 
