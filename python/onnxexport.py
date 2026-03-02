@@ -12,7 +12,7 @@ processor = Sam3Processor.from_pretrained("facebook/sam3")
 
 model.eval()
 
-prompt="dog"
+prompt="person"
 
 # 2. Build a sample batch (same as your example)
 image_url = "http://images.cocodataset.org/val2017/000000077595.jpg"
@@ -23,7 +23,12 @@ inputs = processor(images=image, text=prompt, return_tensors="pt").to(device)
 pixel_values = inputs["pixel_values"]
 input_ids = inputs["input_ids"]
 attention_mask = inputs["attention_mask"]
-print(input_ids.shape)
+
+print("input_ids", input_ids.shape, input_ids.dtype)
+print(input_ids)
+print()
+print("attention_mask", attention_mask.shape, attention_mask.dtype)
+print(attention_mask)
 
 # 3. Wrap Sam3Model so the ONNX graph has clean inputs/outputs
 class Sam3ONNXWrapper(torch.nn.Module):
