@@ -90,7 +90,7 @@ int main(int argc, char* argv[])
 
     const float vis_alpha = 0.3;
     const float probability_threshold = 0.5;
-    const SAM3_VISUALIZATION visualize = SAM3_VISUALIZATION::VIS_INSTANCE_SEGMENTATION;
+    const SAM3_VISUALIZATION visualize = SAM3_VISUALIZATION::VIS_SEMANTIC_SEGMENTATION;
 
     SAM3_PCS pcs(epath, vis_alpha, probability_threshold);
 
@@ -99,6 +99,17 @@ int main(int argc, char* argv[])
 
     std::filesystem::create_directories("results");
     int num_images_read=0;
+
+    // tokenized version of 'person'
+    std::vector<int64_t> iid={49406,  2533, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
+         49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
+         49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
+         49407, 49407};
+    
+    std::vector<int64_t> iam={1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+         0, 0, 0, 0, 0, 0, 0, 0};
+        
+    pcs.set_prompt(iid, iam);
 
     for (const auto& fname : std::filesystem::directory_iterator(in_dir))
     {
