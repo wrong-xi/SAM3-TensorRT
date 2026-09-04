@@ -1,20 +1,9 @@
 from pathlib import Path
-<<<<<<< Updated upstream
-from transformers.models.sam3 import Sam3Processor, Sam3Model
-=======
 
 import torch
->>>>>>> Stashed changes
 from PIL import Image
 from transformers.models.sam3 import Sam3Config, Sam3Model, Sam3Processor
 
-<<<<<<< Updated upstream
-device = "cpu" # for onnx export we use CPU for maximum compatibility
-
-# 1. Load model & processor
-model = Sam3Model.from_pretrained("facebook/sam3").to(device)
-processor = Sam3Processor.from_pretrained("facebook/sam3")
-=======
 from fixed_prompt_wrapper import FixedPromptSam3Wrapper
 from onnx_tensorrt_fix import fix_onnx_file_for_tensorrt
 
@@ -31,7 +20,6 @@ OUTPUT_DIR = Path(__file__).resolve().parent / "onnx_weights_fixed"
 def load_model_and_processor():
     config = Sam3Config.from_pretrained(MODEL_DIR, local_files_only=True)
     config.vision_config.backbone_config.image_size = IMAGE_SIZE
->>>>>>> Stashed changes
 
     model = Sam3Model.from_pretrained(
         MODEL_DIR,
@@ -40,13 +28,6 @@ def load_model_and_processor():
     ).to(DEVICE)
     model.eval()
 
-<<<<<<< Updated upstream
-prompt="person"
-
-# 2. Build a sample batch (same as your example)
-image_url = "http://images.cocodataset.org/val2017/000000077595.jpg"
-image = Image.open(requests.get(image_url, stream=True).raw).convert("RGB")
-=======
     processor = Sam3Processor.from_pretrained(MODEL_DIR, local_files_only=True)
     processor.image_processor.size = {
         "height": IMAGE_SIZE,
@@ -54,7 +35,6 @@ image = Image.open(requests.get(image_url, stream=True).raw).convert("RGB")
     }
     return model, processor
 
->>>>>>> Stashed changes
 
 def verify_against_independent_runs(
     model,
@@ -87,44 +67,9 @@ def verify_against_independent_runs(
                 msg=lambda msg: f"presence logits differ for {prompt!r}: {msg}",
             )
 
-<<<<<<< Updated upstream
-print("input_ids", input_ids.shape, input_ids.dtype)
-print(input_ids)
-print()
-print("attention_mask", attention_mask.shape, attention_mask.dtype)
-print(attention_mask)
-=======
     print("Shared-backbone outputs match two independent full-model runs.")
->>>>>>> Stashed changes
 
 
-<<<<<<< Updated upstream
-    def forward(self, pixel_values, input_ids, attention_mask):
-        outputs = self.sam3(
-            pixel_values=pixel_values,
-            input_ids=input_ids,
-            attention_mask=attention_mask)
-        
-        return outputs.pred_masks, outputs.semantic_seg
-
-wrapper = Sam3ONNXWrapper(model).to(device).eval()
-
-# 5. Export to ONNX
-output_dir = Path(f"onnx_weights")
-output_dir.mkdir(exist_ok=True)
-onnx_path = str(output_dir / f"sam3_dynamic.onnx")
-
-torch.onnx.export(
-    wrapper,
-    (pixel_values, input_ids, attention_mask),
-    onnx_path,
-    input_names=["pixel_values", "input_ids", "attention_mask"],
-    output_names=["instance_masks", "semantic_seg"],
-    dynamo=False,
-    opset_version=17,
-)
-print(f"Exported to {onnx_path}")
-=======
 def export_onnx(wrapper, pixel_values, onnx_path):
     torch.onnx.export(
         wrapper,
@@ -191,4 +136,3 @@ def main():
 
 if __name__ == "__main__":
     main()
->>>>>>> Stashed changes

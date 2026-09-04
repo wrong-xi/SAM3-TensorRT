@@ -97,17 +97,12 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
             mask_width,
             mask_height,
             _overlay_alpha,
-<<<<<<< Updated upstream
-            _probability_threshold,
-            make_float3(255,0,0));
-=======
             _door_thresholds.presence,
             _door_thresholds.mask,
             _handle_thresholds.presence,
             _handle_thresholds.mask,
             make_float3(0,185,118),
             make_float3(230,159,0));
->>>>>>> Stashed changes
     }
     else if (vis_type == SAM3_VISUALIZATION::VIS_INSTANCE_SEGMENTATION)
     {
@@ -306,24 +301,20 @@ void SAM3_PCS::allocate_io_buffers()
         nvinfer1::TensorIOMode mode = trt_engine->getTensorIOMode(name);
 
         nvinfer1::Dims dims = trt_engine->getTensorShape(name);
-<<<<<<< Updated upstream
         // DEBUG: print actual TensorRT tensor shape
-	std::cout << "Tensor " << name << " shape: ";
+        std::cout << "Tensor " << name << " shape: ";
 
         for (int i = 0; i < dims.nbDims; i++)
-	{
-    		std::cout << dims.d[i];
-    		if (i + 1 < dims.nbDims)
-        		std::cout << " x ";
-	}
-	std::cout << std::endl;
+        {
+            std::cout << dims.d[i];
+            if (i + 1 < dims.nbDims)
+            {
+                std::cout << " x ";
+            }
+        }
+        std::cout << std::endl;
 
-	size_t nbytes = sizeof(trt_engine->getTensorDataType(name));
-
-        for (int idx=0;idx < MAX_DIMS; idx++)
-=======
         if (trt_engine->getTensorDataType(name) != nvinfer1::DataType::kFLOAT)
->>>>>>> Stashed changes
         {
             throw std::runtime_error(
                 "The fixed-prompt engine requires FP32 input and output bindings");

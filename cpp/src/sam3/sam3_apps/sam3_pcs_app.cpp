@@ -109,26 +109,6 @@ int main(int argc, char* argv[])
     std::filesystem::create_directories("results");
     int num_images_read=0;
 
-<<<<<<< Updated upstream
-    // tokenized version of 'door handle'
-    std::vector<int64_t> iid={
-    	49406, 2489, 7245, 49407, 49407, 49407, 49407, 49407,
-    	49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
-    	49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407,
-    	49407, 49407, 49407, 49407, 49407, 49407, 49407, 49407
-	};
-
-    std::vector<int64_t> iam={
-    	1, 1, 1, 1, 0, 0, 0, 0,
-    	0, 0, 0, 0, 0, 0, 0, 0,
-    	0, 0, 0, 0, 0, 0, 0, 0,
-    	0, 0, 0, 0, 0, 0, 0, 0
-	};
-        
-    pcs.set_prompt(iid, iam);
-
-=======
->>>>>>> Stashed changes
     for (const auto& fname : std::filesystem::directory_iterator(in_dir))
     {
         if (std::filesystem::is_regular_file(fname.path())) 
