@@ -1,2 +1,6 @@
 *.DS_Store
 *build
+
+onnx_weights/
+onnx_weights2/
+onnx_weights_fixed/
