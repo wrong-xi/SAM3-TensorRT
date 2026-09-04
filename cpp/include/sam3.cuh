@@ -8,9 +8,6 @@
 #include "NvInferRuntime.h"
 #include "prepost.cuh"
 
-
-#define MAX_DIMS 8
-
 static void cuda_check(cudaError_t err, const char* msg)
 {
     if (err != cudaSuccess)
@@ -38,13 +35,19 @@ inline TRTLogger trt_logger{};
 class SAM3_PCS
 {
 public:
-    SAM3_PCS(const std::string engine_path, const float vis_alpha, const float prob_threshold);
+    SAM3_PCS(
+        const std::string& engine_path,
+        float vis_alpha,
+        SAM3_CLASS_THRESHOLDS door_thresholds,
+        SAM3_CLASS_THRESHOLDS handle_thresholds);
     ~SAM3_PCS();
     bool infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type);
     bool run_blind_inference();
     void pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat);
-    // void get_input_sizes()
-    void set_prompt(std::vector<int64_t>& input_ids, std::vector<int64_t>& input_attention_mask);
+    const float* semantic_logits_host() const noexcept;
+    const float* presence_logits_host() const noexcept;
+    int semantic_mask_width() const noexcept;
+    int semantic_mask_height() const noexcept;
     std::vector<void*> output_cpu;
 
 private:
@@ -52,7 +55,10 @@ private:
     cudaStream_t sam3_stream;
     dim3 bsize;
     dim3 gsize;
-    int in_width, in_height, opencv_inbytes;
+    int in_width, in_height, opencv_inbytes, opencv_resultbytes;
+    int mask_width, mask_height;
+    int semantic_output_index = -1;
+    int presence_output_index = -1;
 
     std::vector<void*> input_cpu;
     std::vector<void*> input_gpu;
@@ -66,9 +72,6 @@ private:
     uint8_t* zc_input; // used only if iGPU
 
     uint8_t* input_ptr; // placeholder for dGPU/iGPU ptr to pass into kernel
-    float3* gpu_colpal;
-    void setup_color_palette();
-    
     void check_zero_copy();
     void allocate_io_buffers();
     void load_engine();
@@ -76,7 +79,9 @@ private:
     bool infer_on_iGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type);
 
     void visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type);
-    const float _overlay_alpha, _probability_threshold;
+    const float _overlay_alpha;
+    const SAM3_CLASS_THRESHOLDS _door_thresholds;
+    const SAM3_CLASS_THRESHOLDS _handle_thresholds;
 
     const std::string _engine_path;
 

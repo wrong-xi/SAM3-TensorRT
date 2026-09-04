@@ -1,9 +1,14 @@
 #include "sam3.cuh"
 
-SAM3_PCS::SAM3_PCS(const std::string engine_path, const float vis_alpha, const float prob_threshold)
-    : _engine_path(engine_path)
-    , _overlay_alpha(vis_alpha)
-    , _probability_threshold(prob_threshold)
+SAM3_PCS::SAM3_PCS(
+    const std::string& engine_path,
+    const float vis_alpha,
+    const SAM3_CLASS_THRESHOLDS door_thresholds,
+    const SAM3_CLASS_THRESHOLDS handle_thresholds)
+    : _overlay_alpha(vis_alpha)
+    , _door_thresholds(door_thresholds)
+    , _handle_thresholds(handle_thresholds)
+    , _engine_path(engine_path)
 {
 
     cuda_check(cudaStreamCreate(&sam3_stream), "creating CUDA stream for SAM3");
@@ -15,7 +20,6 @@ SAM3_PCS::SAM3_PCS(const std::string engine_path, const float vis_alpha, const f
     
     check_zero_copy(); // needed before allocating io buffers
     allocate_io_buffers();
-    setup_color_palette();
 
     bsize.x=16;
     bsize.y=16;
@@ -24,6 +28,7 @@ SAM3_PCS::SAM3_PCS(const std::string engine_path, const float vis_alpha, const f
 void SAM3_PCS::pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat)
 {
     opencv_inbytes = input_mat.total() * input_mat.elemSize();
+    opencv_resultbytes = result_mat.total() * result_mat.elemSize();
 
     cuda_check(cudaHostRegister(
             input_mat.data,
@@ -38,7 +43,7 @@ void SAM3_PCS::pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat)
     {
         cuda_check(cudaHostRegister(
             result_mat.data,
-            opencv_inbytes,
+            opencv_resultbytes,
             cudaHostRegisterDefault),
             " pinning opencv result Mat on host"
         );
@@ -55,9 +60,9 @@ void SAM3_PCS::pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat)
     {
         // on dGPU allocate additional memory for input
         cuda_check(cudaMalloc(&opencv_input, opencv_inbytes), " allocating opencv input memory on a dGPU system");
-        cuda_check(cudaMalloc((void**)&gpu_result, opencv_inbytes), " allocating result memory on a dGPU system");        
+        cuda_check(cudaMalloc((void**)&gpu_result, opencv_resultbytes), " allocating result memory on a dGPU system");
         cudaMemset(opencv_input, 0, opencv_inbytes);
-        cudaMemset((void *)gpu_result, 0, opencv_inbytes);
+        cudaMemset((void *)gpu_result, 0, opencv_resultbytes);
     }
 }
 
@@ -72,70 +77,62 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
         input_ptr = static_cast<uint8_t*>(opencv_input);
     }
 
-    if (vis_type == SAM3_VISUALIZATION::VIS_SEMANTIC_SEGMENTATION)
+    if (vis_type == SAM3_VISUALIZATION::VIS_SEMANTIC_SEGMENTATION ||
+        vis_type == SAM3_VISUALIZATION::VIS_CLASS_MAP)
     {
         dim3 sbsize(16,16);
         dim3 sgsize;
         sgsize.x = (input.cols + THREAD_COARSENING_FACTOR*sbsize.x - 1) / (THREAD_COARSENING_FACTOR*sbsize.x);
         sgsize.y = (input.rows + THREAD_COARSENING_FACTOR*sbsize.y - 1) / (THREAD_COARSENING_FACTOR*sbsize.y);
         
-        draw_semantic_seg_mask<<<sgsize, sbsize, 0, sam3_stream>>>(
+        draw_fixed_prompt_semantic_masks<<<sgsize, sbsize, 0, sam3_stream>>>(
             input_ptr,
-            static_cast<float*>(output_gpu[1]),
+            static_cast<float*>(output_gpu[semantic_output_index]),
+            static_cast<float*>(output_gpu[presence_output_index]),
             gpu_result,
             input.cols,
             input.rows,
             input.channels(),
-            SAM3_OUTMASK_WIDTH,
-            SAM3_OUTMASK_HEIGHT,
+            result.channels(),
+            mask_width,
+            mask_height,
             _overlay_alpha,
+<<<<<<< Updated upstream
             _probability_threshold,
             make_float3(255,0,0));
+=======
+            _door_thresholds.presence,
+            _door_thresholds.mask,
+            _handle_thresholds.presence,
+            _handle_thresholds.mask,
+            make_float3(0,185,118),
+            make_float3(230,159,0));
+>>>>>>> Stashed changes
     }
     else if (vis_type == SAM3_VISUALIZATION::VIS_INSTANCE_SEGMENTATION)
     {
-        dim3 ibsize(8,8,8); // 3D block
-        dim3 igsize;
-
-        igsize.x = (input.cols + THREAD_COARSENING_FACTOR*ibsize.x - 1) / (THREAD_COARSENING_FACTOR*ibsize.x);
-        igsize.y = (input.rows + THREAD_COARSENING_FACTOR*ibsize.y - 1) / (THREAD_COARSENING_FACTOR*ibsize.y);
-        // 2D grid
-
-        cuda_check(cudaMemcpyAsync((void *)gpu_result, 
-            (void *)input_ptr, 
-            opencv_inbytes, 
-            cudaMemcpyDeviceToDevice, 
-            sam3_stream), " async memcpy for result during instance seg visualization");
-
-        for (int _mask_channel_idx=0; _mask_channel_idx<200; _mask_channel_idx+=ibsize.z)
-        {
-            draw_instance_seg_mask<<<igsize, ibsize, 0, sam3_stream>>>(
-                input_ptr,
-                static_cast<float*>(output_gpu[0]),
-                gpu_result,
-                input.cols,
-                input.rows,
-                input.channels(),
-                SAM3_OUTMASK_WIDTH,
-                SAM3_OUTMASK_HEIGHT,
-                _mask_channel_idx,
-                _overlay_alpha,
-                _probability_threshold,
-                gpu_colpal);
-        }
+        throw std::runtime_error(
+            "The fixed-prompt engine does not export instance masks");
     }
 
     if (!is_zerocopy && vis_type == SAM3_VISUALIZATION::VIS_NONE)
     {
-        cudaMemcpyAsync(output_cpu[0], output_gpu[0],output_sizes[0], cudaMemcpyDeviceToHost, sam3_stream);
-        cudaMemcpyAsync(output_cpu[1], output_gpu[1],output_sizes[1], cudaMemcpyDeviceToHost, sam3_stream);
+        for (size_t output_index = 0; output_index < output_gpu.size(); ++output_index)
+        {
+            cuda_check(cudaMemcpyAsync(
+                output_cpu[output_index],
+                output_gpu[output_index],
+                output_sizes[output_index],
+                cudaMemcpyDeviceToHost,
+                sam3_stream), "copying raw SAM3 output to the host");
+        }
     }
     else if (!is_zerocopy)
     {
         cudaMemcpyAsync(
             (void*)result.data, 
             (void*)gpu_result, 
-            opencv_inbytes, 
+            opencv_resultbytes,
             cudaMemcpyDeviceToHost, 
             sam3_stream);
     }
@@ -193,6 +190,21 @@ bool SAM3_PCS::infer_on_iGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALI
 
 bool SAM3_PCS::infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type)
 {
+    if (input.size() != result.size())
+    {
+        throw std::runtime_error("Input and result matrices must have equal sizes");
+    }
+    if (vis_type == SAM3_VISUALIZATION::VIS_CLASS_MAP && result.type() != CV_8UC1)
+    {
+        throw std::runtime_error("VIS_CLASS_MAP requires a CV_8UC1 result matrix");
+    }
+    if (vis_type == SAM3_VISUALIZATION::VIS_SEMANTIC_SEGMENTATION &&
+        result.type() != CV_8UC3)
+    {
+        throw std::runtime_error(
+            "VIS_SEMANTIC_SEGMENTATION requires a CV_8UC3 result matrix");
+    }
+
     if (is_zerocopy)
     {
         return infer_on_iGPU(input, result, vis_type);
@@ -207,6 +219,26 @@ bool SAM3_PCS::run_blind_inference()
     bool res = trt_ctx->enqueueV3(sam3_stream);
     cudaStreamSynchronize(sam3_stream);
     return res;
+}
+
+const float* SAM3_PCS::semantic_logits_host() const noexcept
+{
+    return static_cast<const float*>(output_cpu[semantic_output_index]);
+}
+
+const float* SAM3_PCS::presence_logits_host() const noexcept
+{
+    return static_cast<const float*>(output_cpu[presence_output_index]);
+}
+
+int SAM3_PCS::semantic_mask_width() const noexcept
+{
+    return mask_width;
+}
+
+int SAM3_PCS::semantic_mask_height() const noexcept
+{
+    return mask_height;
 }
 
 void SAM3_PCS::load_engine()
@@ -274,6 +306,7 @@ void SAM3_PCS::allocate_io_buffers()
         nvinfer1::TensorIOMode mode = trt_engine->getTensorIOMode(name);
 
         nvinfer1::Dims dims = trt_engine->getTensorShape(name);
+<<<<<<< Updated upstream
         // DEBUG: print actual TensorRT tensor shape
 	std::cout << "Tensor " << name << " shape: ";
 
@@ -288,8 +321,23 @@ void SAM3_PCS::allocate_io_buffers()
 	size_t nbytes = sizeof(trt_engine->getTensorDataType(name));
 
         for (int idx=0;idx < MAX_DIMS; idx++)
+=======
+        if (trt_engine->getTensorDataType(name) != nvinfer1::DataType::kFLOAT)
+>>>>>>> Stashed changes
         {
-            nbytes*=std::max(1, (int)dims.d[idx]);
+            throw std::runtime_error(
+                "The fixed-prompt engine requires FP32 input and output bindings");
+        }
+
+        size_t nbytes = sizeof(float);
+        for (int idx=0; idx < dims.nbDims; idx++)
+        {
+            if (dims.d[idx] <= 0)
+            {
+                throw std::runtime_error(
+                    "Dynamic TensorRT binding shapes are not supported");
+            }
+            nbytes *= static_cast<size_t>(dims.d[idx]);
         }
 
         void *cpu_buf, *gpu_buf;
@@ -321,7 +369,7 @@ void SAM3_PCS::allocate_io_buffers()
             input_cpu.push_back(cpu_buf);
             input_gpu.push_back(gpu_buf);
 
-            if (dims.d[1]==3) // typically 3 input channels for SAM like models
+            if (dims.nbDims == 4 && dims.d[1] == 3)
             {
                 in_width = dims.d[3];
                 in_height= dims.d[2];
@@ -336,10 +384,32 @@ void SAM3_PCS::allocate_io_buffers()
         else if (mode == nvinfer1::TensorIOMode::kOUTPUT)
         {
             std::cout << "Found output tensor " << name << std::endl;
+            const int output_index = static_cast<int>(output_cpu.size());
             _output_names.push_back(std::string(name));
             output_cpu.push_back(cpu_buf);
             output_gpu.push_back(gpu_buf);
             output_sizes.push_back(nbytes);
+
+            if (std::string(name) == "semantic_logits")
+            {
+                if (dims.nbDims != 4 || dims.d[0] != 2 || dims.d[1] != 1)
+                {
+                    throw std::runtime_error(
+                        "semantic_logits must have shape [2, 1, H, W]");
+                }
+                semantic_output_index = output_index;
+                mask_height = dims.d[2];
+                mask_width = dims.d[3];
+            }
+            else if (std::string(name) == "presence_logits")
+            {
+                if (dims.nbDims != 2 || dims.d[0] != 2 || dims.d[1] != 1)
+                {
+                    throw std::runtime_error(
+                        "presence_logits must have shape [2, 1]");
+                }
+                presence_output_index = output_index;
+            }
         }
         else
         {
@@ -352,65 +422,17 @@ void SAM3_PCS::allocate_io_buffers()
         }
 
     }
-}
 
-void SAM3_PCS::set_prompt(std::vector<int64_t>& input_ids, 
-    std::vector<int64_t>& input_attention_mask)
-{
-    auto iid_obj = std::find(_input_names.begin(), _input_names.end(), "input_ids");
-    auto iam_obj = std::find(_input_names.begin(), _input_names.end(), "attention_mask");
-
-    if (iid_obj==_input_names.end())
+    if (_input_names.size() != 1 || _input_names[image_index] != "pixel_values")
     {
-        throw std::runtime_error("input_ids not found in input names, seems to be a bug");
+        throw std::runtime_error(
+            "The fixed-prompt engine must have only the pixel_values input");
     }
-
-    if (iam_obj==_input_names.end())
+    if (semantic_output_index < 0 || presence_output_index < 0)
     {
-        throw std::runtime_error("attention_mask not found in input names, seems to be a bug");
+        throw std::runtime_error(
+            "The engine must expose semantic_logits and presence_logits outputs");
     }
-
-    int iid_idx = std::distance(_input_names.begin(), iid_obj);
-    int iam_idx = std::distance(_input_names.begin(), iam_obj);
-
-    std::memcpy((int64_t *)input_cpu[iid_idx], 
-        input_ids.data(), 
-        input_ids.size()*sizeof(int64_t));
-
-    std::memcpy((int64_t *)input_cpu[iam_idx], 
-        input_attention_mask.data(), 
-        input_attention_mask.size()*sizeof(int64_t));
-    
-    if (!is_zerocopy)
-    {
-        cudaMemcpyAsync(input_gpu[iid_idx],
-            input_cpu[iid_idx],
-            input_ids.size()*sizeof(int64_t), 
-            cudaMemcpyHostToDevice, 
-            sam3_stream);
-        
-        cudaMemcpyAsync(input_gpu[iam_idx],
-            input_cpu[iam_idx],
-            input_attention_mask.size()*sizeof(int64_t), 
-            cudaMemcpyHostToDevice, 
-            sam3_stream);
-        
-        cudaStreamSynchronize(sam3_stream);
-    }
-}
-
-void SAM3_PCS::setup_color_palette()
-{
-    cuda_check(cudaMalloc(&gpu_colpal, colpal.size()*sizeof(float3)), 
-        " allocating color palette on GPU");
-        
-    cuda_check(cudaMemcpyAsync((void *)gpu_colpal, 
-            (void *)colpal.data(), 
-            colpal.size()*sizeof(float3), 
-            cudaMemcpyHostToDevice, 
-            sam3_stream), " async memcpy for color pallete");
-    
-    cudaStreamSynchronize(sam3_stream);
 }
 
 SAM3_PCS::~SAM3_PCS()

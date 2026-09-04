@@ -109,15 +109,49 @@ docker run -it --rm \
   sam3-trt bash
 ```
 
-4) Export to ONNX
-```bash
-python python/onnxexport.py
-```
-This produces `onnx_weights/sam3_dynamic.onnx` plus external weight shards.
+4) Export the fixed `door` + `door handle` model to ONNX on Windows
 
-5) Build a TensorRT engine
+Edit `MODEL_DIR`, `SAMPLE_IMAGE`, and `IMAGE_SIZE` at the top of
+`python/onnxexport.py` if needed. The script loads the Hugging Face
+`model.safetensors` checkpoint in `MODEL_DIR`; it does not load `sam3.pt`.
+
+```powershell
+conda activate sam3
+cd C:\code\xxx\sam3-main\SAM3-TensorRT
+python python\onnxexport.py
+```
+
+This produces
+`python/onnx_weights_fixed/sam3_door_door_handle.onnx`. Depending on the ONNX
+exporter's size handling, it may also create external weight files. Copy the
+entire `onnx_weights_fixed` directory to the Jetson; files under `_weights`
+are external ONNX initializers, not duplicate models.
+
+At the end of export, the script removes the six decoder `If` nodes emitted
+for `squeeze(-1)` that TensorRT 10.3 cannot parse. The expected message for
+this SAM3 configuration is `replaced 6 decoder squeeze If node(s)`.
+
+The exported graph has one input and two outputs:
+
+- `pixel_values`: `[1, 3, 672, 672]`
+- `semantic_logits`: `[2, 1, 192, 192]` (`0=door`, `1=door handle`)
+- `presence_logits`: `[2, 1]`
+
+The image encoder runs once. Its feature maps are reused by a two-item prompt
+batch for the detector and mask heads. Both text embeddings are constants in
+the ONNX graph, so C++ does not pass token IDs at runtime.
+
+5) Build a TensorRT engine on the Jetson
+
+TensorRT engines are platform- and TensorRT-version-specific, so build the
+engine on the target Jetson rather than copying an engine built on Windows.
+
 ```bash
-trtexec --onnx=onnx_weights/sam3_dynamic.onnx --saveEngine=sam3_fp16.plan --fp16 --verbose
+trtexec \
+  --onnx=python/onnx_weights_fixed/sam3_door_door_handle.onnx \
+  --saveEngine=sam3_door_door_handle_fp16.plan \
+  --fp16 \
+  --verbose
 ```
 
 6) Build the C++/CUDA library and sample app
@@ -134,6 +168,25 @@ make
 
 Results are written to a `results/` folder.
 
+The demo applies separate presence and pixel-mask thresholds to the two
+classes:
+
+```cpp
+const SAM3_CLASS_THRESHOLDS door_thresholds = {0.50F, 0.50F};
+const SAM3_CLASS_THRESHOLDS handle_thresholds = {0.45F, 0.55F};
+SAM3_PCS pcs(engine_path, 0.3F, door_thresholds, handle_thresholds);
+```
+
+If only one class passes its own presence and mask thresholds, only that class
+is drawn. If both masks cover the same pixel, `door handle` has priority. The
+CUDA postprocessor supports a three-channel overlay with
+`VIS_SEMANTIC_SEGMENTATION`, or an efficient single-channel label map with
+`VIS_CLASS_MAP` (`0=door`, `1=door handle`, `255=background`). Construct the
+label-map result as `CV_8UC1` before calling `pin_opencv_matrices`. Use
+`VIS_NONE` only when CPU code needs the raw logits. After a `VIS_NONE` call,
+use `semantic_logits_host()` and `presence_logits_host()` rather than relying
+on TensorRT output ordering.
+
 
 ## Extensions
 This is a very raw project and provides the crucial backend TensorRT/CUDA bits necessary for anything. From here, please feel free to fan out into any application you like. Pull requests are very welcome! Here are some ideas I can think of:
@@ -144,7 +197,11 @@ This is a very raw project and provides the crucial backend TensorRT/CUDA bits n
 ## Troubleshooting
 - **Access errors:** Make sure your `HF_TOKEN` has access to `facebook/sam3`.
 - **ONNX export fails:** Install `transformers` from source if SAM3 is missing.
-- **TensorRT parse errors:** Ensure the full `onnx_weights/` directory is copied (external data is required).
+- **TensorRT `/sam3/detr_decoder/If` parse error:** Re-export with the current
+  `python/onnxexport.py`; it applies the TensorRT compatibility rewrite after
+  export.
+- **Missing external ONNX data:** If export created an `_weights` directory,
+  copy it together with the `.onnx` file without changing their relative paths.
 - **C++ build errors:** Confirm CUDA, TensorRT, and OpenCV are installed and discoverable via `pkg-config`.
 
 ## Development guide
@@ -169,8 +226,12 @@ TensorRT + CUDA (benchmark mode disables output writes):
 ```
 
 ### ONNX Export Details
-- Default export runs on CPU for compatibility (switch `device` to `cuda` if desired).
-- SAM3 is large and exports with external weight shards; keep the entire `onnx_weights/` directory together.
+- Export size is fixed by `IMAGE_SIZE` in `python/onnxexport.py`; TensorRT does
+  not change it later. The C++ preprocessor resizes source images to this
+  engine input size.
+- Export uses CUDA when available and falls back to CPU.
+- SAM3 is large and may export with external weight shards; keep the entire
+  `onnx_weights_fixed/` directory together.
 
 ### TensorRT Notes
 - Use `trtexec` for quick engine builds and benchmarking.

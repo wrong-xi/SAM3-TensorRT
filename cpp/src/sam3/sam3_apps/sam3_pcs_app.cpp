@@ -48,8 +48,12 @@ void infer_one_image(SAM3_PCS& pcs,
 
     if (vis == SAM3_VISUALIZATION::VIS_NONE)
     {
-        cv::Mat seg = cv::Mat(SAM3_OUTMASK_WIDTH, SAM3_OUTMASK_HEIGHT, CV_32FC1, pcs.output_cpu[1]);
-        // these are raw logits and should be passed through sigmoid before for any quantitative use
+        // These are raw logits. Apply sigmoid before quantitative use.
+        const float* semantic_logits = pcs.semantic_logits_host();
+        const float* presence_logits = pcs.presence_logits_host();
+        (void)semantic_logits;
+        (void)presence_logits;
+        return;
     }
     else
     {
@@ -89,10 +93,15 @@ int main(int argc, char* argv[])
     float millis_elapsed = 0.0; // int will overflow after ~650 hours
 
     const float vis_alpha = 0.3;
-    const float probability_threshold = 0.5;
+    const SAM3_CLASS_THRESHOLDS door_thresholds = {0.5F, 0.5F};
+    const SAM3_CLASS_THRESHOLDS handle_thresholds = {0.5F, 0.5F};
     const SAM3_VISUALIZATION visualize = SAM3_VISUALIZATION::VIS_SEMANTIC_SEGMENTATION;
 
-    SAM3_PCS pcs(epath, vis_alpha, probability_threshold);
+    SAM3_PCS pcs(
+        epath,
+        vis_alpha,
+        door_thresholds,
+        handle_thresholds);
 
     cv::Mat img, result;
     char* raw_bytes;
@@ -100,6 +109,7 @@ int main(int argc, char* argv[])
     std::filesystem::create_directories("results");
     int num_images_read=0;
 
+<<<<<<< Updated upstream
     // tokenized version of 'door handle'
     std::vector<int64_t> iid={
     	49406, 2489, 7245, 49407, 49407, 49407, 49407, 49407,
@@ -117,23 +127,34 @@ int main(int argc, char* argv[])
         
     pcs.set_prompt(iid, iam);
 
+=======
+>>>>>>> Stashed changes
     for (const auto& fname : std::filesystem::directory_iterator(in_dir))
     {
         if (std::filesystem::is_regular_file(fname.path())) 
         {
-            std::filesystem::path outfile = std::filesystem::path("results") / fname.path().filename();
+            const std::string image_path = fname.path().string();
+            const std::string outfile =
+                (std::filesystem::path("results") / fname.path().filename()).string();
             
             if (num_images_read==0)
             {
-                cv::Mat tmp = cv::imread(fname.path(), cv::IMREAD_COLOR);
+                cv::Mat tmp = cv::imread(image_path, cv::IMREAD_COLOR);
                 raw_bytes = (char *)malloc(tmp.total()*tmp.elemSize());
-                read_image_into_buffer(fname.path(), raw_bytes, img);
-                result = cv::imread(fname.path(), cv::IMREAD_COLOR);
+                read_image_into_buffer(image_path, raw_bytes, img);
+                if (visualize == SAM3_VISUALIZATION::VIS_CLASS_MAP)
+                {
+                    result = cv::Mat::zeros(img.size(), CV_8UC1);
+                }
+                else
+                {
+                    result = cv::imread(image_path, cv::IMREAD_COLOR);
+                }
                 pcs.pin_opencv_matrices(img, result);
             }
             else
             {
-                read_image_into_buffer(fname.path(), raw_bytes, img);
+                read_image_into_buffer(image_path, raw_bytes, img);
             }
             start = std::chrono::system_clock::now();
             infer_one_image(pcs, img, result, visualize, outfile, benchmark);

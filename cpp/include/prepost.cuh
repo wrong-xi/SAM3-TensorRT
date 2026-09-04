@@ -4,14 +4,19 @@
 #include <stdio.h>
 #include <vector>
 
+#include "semantic_selection.hpp"
+
 #define THREAD_COARSENING_FACTOR 2
 // thread coarsening factor in x and y
 
 #define SAM3_RESCALE_FACTOR 0.00392156862745098
 #define SAM3_IMG_MEAN 0.5
 #define SAM3_IMG_STD 0.5
+<<<<<<< Updated upstream
 #define SAM3_OUTMASK_WIDTH 192
 #define SAM3_OUTMASK_HEIGHT 192
+=======
+>>>>>>> Stashed changes
 // taken from https://huggingface.co/facebook/sam3/blob/main/processor_config.json
 
 __global__ void pre_process_sam3(
@@ -23,18 +28,24 @@ __global__ void pre_process_sam3(
     int dst_width,
     int dst_height);
 
-__global__ void draw_semantic_seg_mask(
+__global__ void draw_fixed_prompt_semantic_masks(
     uint8_t* src,
-    float* mask,
+    float* semantic_logits,
+    float* presence_logits,
     uint8_t* result,
     int src_width,
     int src_height,
     int src_channels,
+    int result_channels,
     int mask_width,
     int mask_height,
     float mask_alpha,
-    float prob_threshold,
-    float3 color);
+    float door_presence_threshold,
+    float door_mask_threshold,
+    float handle_presence_threshold,
+    float handle_mask_threshold,
+    float3 door_color,
+    float3 handle_color);
 
 __global__ void draw_instance_seg_mask(
     uint8_t* src,

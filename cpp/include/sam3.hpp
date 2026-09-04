@@ -15,8 +15,14 @@ typedef enum {
 typedef enum {
     VIS_NONE,
     VIS_SEMANTIC_SEGMENTATION,
+    VIS_CLASS_MAP,
     VIS_INSTANCE_SEGMENTATION
 } SAM3_VISUALIZATION;
+
+typedef struct {
+    float presence;
+    float mask;
+} SAM3_CLASS_THRESHOLDS;
 
 typedef struct {
     float score;
