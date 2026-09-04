@@ -10,8 +10,8 @@
 #define SAM3_RESCALE_FACTOR 0.00392156862745098
 #define SAM3_IMG_MEAN 0.5
 #define SAM3_IMG_STD 0.5
-#define SAM3_OUTMASK_WIDTH 288
-#define SAM3_OUTMASK_HEIGHT 288
+#define SAM3_OUTMASK_WIDTH 192
+#define SAM3_OUTMASK_HEIGHT 192
 // taken from https://huggingface.co/facebook/sam3/blob/main/processor_config.json
 
 __global__ void pre_process_sam3(

@@ -90,7 +90,7 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
             SAM3_OUTMASK_HEIGHT,
             _overlay_alpha,
             _probability_threshold,
-            make_float3(0,185,118));
+            make_float3(255,0,0));
     }
     else if (vis_type == SAM3_VISUALIZATION::VIS_INSTANCE_SEGMENTATION)
     {
@@ -274,8 +274,19 @@ void SAM3_PCS::allocate_io_buffers()
         nvinfer1::TensorIOMode mode = trt_engine->getTensorIOMode(name);
 
         nvinfer1::Dims dims = trt_engine->getTensorShape(name);
-        size_t nbytes = sizeof(trt_engine->getTensorDataType(name));
-        
+        // DEBUG: print actual TensorRT tensor shape
+	std::cout << "Tensor " << name << " shape: ";
+
+        for (int i = 0; i < dims.nbDims; i++)
+	{
+    		std::cout << dims.d[i];
+    		if (i + 1 < dims.nbDims)
+        		std::cout << " x ";
+	}
+	std::cout << std::endl;
+
+	size_t nbytes = sizeof(trt_engine->getTensorDataType(name));
+
         for (int idx=0;idx < MAX_DIMS; idx++)
         {
             nbytes*=std::max(1, (int)dims.d[idx]);
@@ -303,7 +314,7 @@ void SAM3_PCS::allocate_io_buffers()
 
         trt_ctx->setTensorAddress(name, gpu_buf);
 
-        if (mode == nvinfer1::TensorIOMode::kINPUT)
+       if (mode == nvinfer1::TensorIOMode::kINPUT)
         {
             std::cout << "Found input tensor " << name << std::endl;
             _input_names.push_back(std::string(name));

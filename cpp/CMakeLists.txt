@@ -9,12 +9,7 @@ add_compile_options(-std=c++17)
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -O3)
 
 
-find_package(
-    PkgConfig
-    REQUIRED
-)
-
-pkg_check_modules(OpenCV REQUIRED opencv4)
+find_package(OpenCV REQUIRED)
 
 find_package(
     CUDA
@@ -34,18 +29,24 @@ add_library(sam3_trt SHARED
     src/sam3/sam3_trt/sam3.cu
     src/sam3/sam3_trt/prepost.cu
     )
+target_include_directories(
+    sam3_trt
+    PRIVATE
+    ${OpenCV_INCLUDE_DIRS}
+)
 
-set_target_properties(sam3_trt PROPERTIES CUDA_SEPARABLE_COMPILATION ON CUDA_ARCHITECTURES "native")
+
+set_target_properties(sam3_trt PROPERTIES CUDA_SEPARABLE_COMPILATION ON CUDA_ARCHITECTURES "87")
 
 target_link_libraries(
-    sam3_trt PUBLIC ${CUDA_LIBRARIES} nvinfer nvonnxparser stdc++fs
+	sam3_trt PUBLIC ${CUDA_LIBRARIES} ${OpenCV_LIBRARIES} nvinfer nvonnxparser stdc++fs
 )
 
 add_executable(sam3_pcs_app 
     src/sam3/sam3_apps/sam3_pcs_app.cpp
     )
 
-set_target_properties(sam3_pcs_app PROPERTIES CUDA_SEPARABLE_COMPILATION ON CUDA_ARCHITECTURES "native")
+set_target_properties(sam3_pcs_app PROPERTIES CUDA_SEPARABLE_COMPILATION ON CUDA_ARCHITECTURES "87")
 
 
 target_link_libraries(
