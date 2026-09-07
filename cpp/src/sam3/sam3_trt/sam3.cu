@@ -84,11 +84,22 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
         dim3 sgsize;
         sgsize.x = (input.cols + THREAD_COARSENING_FACTOR*sbsize.x - 1) / (THREAD_COARSENING_FACTOR*sbsize.x);
         sgsize.y = (input.rows + THREAD_COARSENING_FACTOR*sbsize.y - 1) / (THREAD_COARSENING_FACTOR*sbsize.y);
-        
-        draw_fixed_prompt_semantic_masks<<<sgsize, sbsize, 0, sam3_stream>>>(
-            input_ptr,
+
+        const int mask_area = mask_width * mask_height;
+        constexpr int probability_block_size = 256;
+        const int probability_blocks =
+            (2 * mask_area + 2 + probability_block_size - 1) / probability_block_size;
+        prepare_fixed_prompt_probabilities<<<probability_blocks, probability_block_size, 0, sam3_stream>>>(
             static_cast<float*>(output_gpu[semantic_output_index]),
             static_cast<float*>(output_gpu[presence_output_index]),
+            fixed_prompt_probabilities.get(),
+            mask_area);
+        cuda_check(cudaGetLastError(), "preparing fixed-prompt probabilities");
+
+        draw_fixed_prompt_semantic_masks<<<sgsize, sbsize, 0, sam3_stream>>>(
+            input_ptr,
+            fixed_prompt_probabilities.get(),
+            fixed_prompt_probabilities.get() + 2 * mask_area,
             gpu_result,
             input.cols,
             input.rows,
@@ -103,6 +114,7 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
             _handle_thresholds.mask,
             make_float3(0,185,118),
             make_float3(230,159,0));
+        cuda_check(cudaGetLastError(), "resizing and selecting fixed-prompt masks");
     }
     else if (vis_type == SAM3_VISUALIZATION::VIS_INSTANCE_SEGMENTATION)
     {
@@ -424,6 +436,13 @@ void SAM3_PCS::allocate_io_buffers()
         throw std::runtime_error(
             "The engine must expose semantic_logits and presence_logits outputs");
     }
+
+    // Reuse low-resolution GPU probabilities; keep raw engine logits untouched.
+    float* probabilities = nullptr;
+    cuda_check(cudaMalloc(&probabilities,
+        output_sizes[semantic_output_index] + output_sizes[presence_output_index]),
+        "allocating fixed-prompt probability buffer");
+    fixed_prompt_probabilities.reset(probabilities);
 }
 
 SAM3_PCS::~SAM3_PCS()

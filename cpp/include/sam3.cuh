@@ -3,6 +3,7 @@
 #include "sam3.hpp"
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include "cuda_runtime.h"
 #include "NvInfer.h"
 #include "NvInferRuntime.h"
@@ -66,6 +67,7 @@ private:
 
     std::vector<void*> output_gpu;
     std::vector<size_t>output_sizes;
+    std::unique_ptr<float, decltype(&cudaFree)> fixed_prompt_probabilities{nullptr, &cudaFree};
 
     void* opencv_input; // used only if dGPU
     uint8_t* gpu_result; // used for both

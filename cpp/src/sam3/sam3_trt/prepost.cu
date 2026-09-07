@@ -59,14 +59,44 @@ __global__ void pre_process_sam3(
     }
 }
 
+__global__ void prepare_fixed_prompt_probabilities(
+    const float* semantic_logits,
+    const float* presence_logits,
+    float* probabilities,
+    int mask_area)
+{
+    const int index = blockIdx.x * blockDim.x + threadIdx.x;
+    const int semantic_count = 2 * mask_area;
+    if (index < semantic_count + 2)
+    {
+        const float logit = index < semantic_count ?
+            semantic_logits[index] : presence_logits[index - semantic_count];
+        probabilities[index] = 1.0F / (1.0F + expf(-logit));
+    }
+}
+
+namespace
+{
+__device__ float bilinear_probability(const float* probabilities,
+    int top_left, int top_right, int bottom_left, int bottom_right,
+    float weight_x, float weight_y)
+{
+    const float top = probabilities[top_left] +
+        (probabilities[top_right] - probabilities[top_left]) * weight_x;
+    const float bottom = probabilities[bottom_left] +
+        (probabilities[bottom_right] - probabilities[bottom_left]) * weight_x;
+    return top + (bottom - top) * weight_y;
+}
+}
+
 // Note: In the next 2 functions, src and result matrices are assumed 
 // to be the same size. It is the responsibility of the calling application
 // to ensure equal sizes for these. However, mask can be a different size
 
 __global__ void draw_fixed_prompt_semantic_masks(
-    uint8_t* src,
-    float* semantic_logits,
-    float* presence_logits,
+    const uint8_t* src,
+    const float* semantic_probabilities,
+    const float* presence_probabilities,
     uint8_t* result,
     int src_width,
     int src_height,
@@ -91,11 +121,11 @@ __global__ void draw_fixed_prompt_semantic_masks(
 
     if (res_min_x < src_width && res_min_y < src_height)
     {
-        const float door_presence_probability =
-            1.0F / (1.0F + expf(-presence_logits[0]));
-        const float handle_presence_probability =
-            1.0F / (1.0F + expf(-presence_logits[1]));
+        const float door_presence_probability = presence_probabilities[0];
+        const float handle_presence_probability = presence_probabilities[1];
         const int mask_area = mask_width * mask_height;
+        const float scale_x = static_cast<float>(mask_width) / src_width;
+        const float scale_y = static_cast<float>(mask_height) / src_height;
 
         #pragma unroll
         for (int ix=0; ix < THREAD_COARSENING_FACTOR; ix++)
@@ -113,15 +143,29 @@ __global__ void draw_fixed_prompt_semantic_masks(
                 const int pixel_index = res_loc_y*src_width + res_loc_x;
                 const int src_loc = pixel_index*src_channels;
 
-                int mask_loc_x = res_loc_x*mask_width/src_width;
-                int mask_loc_y = res_loc_y*mask_height/src_height;
-                int mask_loc = mask_loc_y*mask_width + mask_loc_x;
+                // HF semantic postprocessing: resize probabilities with
+                // bilinear align_corners=False, then threshold and merge labels.
+                const float mask_x = fminf(fmaxf(
+                    (res_loc_x + 0.5F) * scale_x - 0.5F, 0.0F), mask_width - 1.0F);
+                const float mask_y = fminf(fmaxf(
+                    (res_loc_y + 0.5F) * scale_y - 0.5F, 0.0F), mask_height - 1.0F);
+                const int x0 = static_cast<int>(mask_x);
+                const int y0 = static_cast<int>(mask_y);
+                const int x1 = min(x0 + 1, mask_width - 1);
+                const int y1 = min(y0 + 1, mask_height - 1);
+                const float weight_x = mask_x - x0;
+                const float weight_y = mask_y - y0;
+                const int top_left = y0 * mask_width + x0;
+                const int top_right = y0 * mask_width + x1;
+                const int bottom_left = y1 * mask_width + x0;
+                const int bottom_right = y1 * mask_width + x1;
 
                 const float door_mask_probability =
-                    1.0F / (1.0F + expf(-semantic_logits[mask_loc]));
+                    bilinear_probability(semantic_probabilities,
+                        top_left, top_right, bottom_left, bottom_right, weight_x, weight_y);
                 const float handle_mask_probability =
-                    1.0F / (1.0F + expf(
-                        -semantic_logits[mask_area + mask_loc]));
+                    bilinear_probability(semantic_probabilities + mask_area,
+                        top_left, top_right, bottom_left, bottom_right, weight_x, weight_y);
                 const SemanticClassSelection selection = select_semantic_class(
                     door_presence_probability,
                     door_mask_probability,
