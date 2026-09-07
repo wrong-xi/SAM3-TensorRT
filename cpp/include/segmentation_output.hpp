@@ -23,7 +23,8 @@ inline void save_segmentation_outputs(
     }
 
     // Keep the source extension to distinguish e.g. frame.jpg and frame.png.
-    const std::string output_name = input_name.filename().string() + ".png";
+//    const std::string output_name = input_name.filename().string() + ".png";
+    const std::string output_name = input_name.stem().string() + ".png";
     const auto mask_dir = output_dir / "masks";
     std::filesystem::create_directories(mask_dir);
     const auto mask_path = mask_dir / output_name;
