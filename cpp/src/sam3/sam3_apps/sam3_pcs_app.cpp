@@ -1,5 +1,6 @@
 #include "sam3.hpp"
 #include "sam3.cuh"
+#include "segmentation_output.hpp"
 #include <chrono>
 #include <thread>
 #include <opencv2/imgproc.hpp>
@@ -34,68 +35,66 @@ void read_image_into_buffer(const std::string imgpath, char* raw_buffer, cv::Mat
 
 void infer_one_image(SAM3_PCS& pcs, 
     const cv::Mat& img, 
-    cv::Mat& result, 
-    const SAM3_VISUALIZATION vis,
-    const std::string outfile,
-    bool benchmark_run)
+    cv::Mat& mask,
+    const std::filesystem::path& input_name,
+    bool benchmark_run,
+    bool save_vis,
+    float vis_alpha)
 {
-    bool success = pcs.infer_on_image(img, result, vis);
+    if (!pcs.infer_on_image(img, mask, SAM3_VISUALIZATION::VIS_CLASS_MAP))
+    {
+        throw std::runtime_error("SAM3 inference failed for " + input_name.string());
+    }
 
     if (benchmark_run)
     {
         return;
     }
 
-    if (vis == SAM3_VISUALIZATION::VIS_NONE)
-    {
-        // These are raw logits. Apply sigmoid before quantitative use.
-        const float* semantic_logits = pcs.semantic_logits_host();
-        const float* presence_logits = pcs.presence_logits_host();
-        (void)semantic_logits;
-        (void)presence_logits;
-        return;
-    }
-    else
-    {
-        cv::imwrite(outfile, result);
-    }
+    save_segmentation_outputs(img, mask, "results", input_name, save_vis, vis_alpha);
 }
 
 int main(int argc, char* argv[])
 {
-    if (argc < 3)
+    if (argc < 3 || argc > 5)
     {
-        std::cout << "Usage: ./sam3_pcs_app indir engine_path.engine <benchmark=false>" << std::endl;
-        return 0;
+        std::cout << "Usage: ./sam3_pcs_app indir engine_path.engine [benchmark=0] [save_vis=0]" << std::endl;
+        return 1;
     }
 
     const std::string in_dir = argv[1];
     std::string epath = argv[2];
     bool benchmark=false; // in benchmarking mode we dont save output images
+    bool save_vis=false;
 
-    if (argc==4)
+    for (int arg_index = 3; arg_index < argc; ++arg_index)
     {
-        std::string b_arg = argv[3]; // should be 0 or 1
-        try
+        const std::string value = argv[arg_index];
+        if (value != "0" && value != "1")
         {
-            benchmark = (b_arg == "1");
-        }
-        catch(const std::exception)
-        {
-            std::cout << "Unrecognized benchmark type " << argv[3] << std::endl;
+            std::cerr << "benchmark and save_vis must be 0 or 1" << std::endl;
+            return 1;
         }
     }
+    if (argc >= 4)
+    {
+        benchmark = (std::string(argv[3]) == "1");
+    }
+    if (argc == 5)
+    {
+        save_vis = (std::string(argv[4]) == "1");
+    }
     std::cout << "Benchmarking: " << benchmark << std::endl;
+    std::cout << "Save visualization: " << (save_vis && !benchmark) << std::endl;
 
     auto start = std::chrono::system_clock::now();
     auto end = std::chrono::system_clock::now();
     std::chrono::duration<float> diff;
     float millis_elapsed = 0.0; // int will overflow after ~650 hours
 
-    const float vis_alpha = 0.3;
-    const SAM3_CLASS_THRESHOLDS door_thresholds = {0.5F, 0.5F};
+    const float vis_alpha = 0.6;
+    const SAM3_CLASS_THRESHOLDS door_thresholds = {0.5F, 0.75F};
     const SAM3_CLASS_THRESHOLDS handle_thresholds = {0.5F, 0.5F};
-    const SAM3_VISUALIZATION visualize = SAM3_VISUALIZATION::VIS_SEMANTIC_SEGMENTATION;
 
     SAM3_PCS pcs(
         epath,
@@ -106,7 +105,6 @@ int main(int argc, char* argv[])
     cv::Mat img, result;
     char* raw_bytes;
 
-    std::filesystem::create_directories("results");
     int num_images_read=0;
 
     for (const auto& fname : std::filesystem::directory_iterator(in_dir))
@@ -114,22 +112,13 @@ int main(int argc, char* argv[])
         if (std::filesystem::is_regular_file(fname.path())) 
         {
             const std::string image_path = fname.path().string();
-            const std::string outfile =
-                (std::filesystem::path("results") / fname.path().filename()).string();
             
             if (num_images_read==0)
             {
                 cv::Mat tmp = cv::imread(image_path, cv::IMREAD_COLOR);
                 raw_bytes = (char *)malloc(tmp.total()*tmp.elemSize());
                 read_image_into_buffer(image_path, raw_bytes, img);
-                if (visualize == SAM3_VISUALIZATION::VIS_CLASS_MAP)
-                {
-                    result = cv::Mat::zeros(img.size(), CV_8UC1);
-                }
-                else
-                {
-                    result = cv::imread(image_path, cv::IMREAD_COLOR);
-                }
+                result = cv::Mat(img.size(), CV_8UC1, cv::Scalar(sam3_background_label));
                 pcs.pin_opencv_matrices(img, result);
             }
             else
@@ -137,7 +126,7 @@ int main(int argc, char* argv[])
                 read_image_into_buffer(image_path, raw_bytes, img);
             }
             start = std::chrono::system_clock::now();
-            infer_one_image(pcs, img, result, visualize, outfile, benchmark);
+            infer_one_image(pcs, img, result, fname.path().filename(), benchmark, save_vis, vis_alpha);
             num_images_read++;
             end = std::chrono::system_clock::now();
             diff = end - start;

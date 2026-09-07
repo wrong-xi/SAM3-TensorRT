@@ -166,7 +166,26 @@ make
 ./sam3_pcs_app <image_dir> <engine_path.engine>
 ```
 
-Results are written to a `results/` folder.
+By default, each image produces a single-channel, original-resolution PNG in
+`results/masks/`: `0=door`, `128=door handle`, `255=background`. An image with
+no selected foreground produces an all-255 mask. PNG preserves these label
+values exactly. The source extension is retained, e.g. `frame.jpg` becomes
+`results/masks/frame.jpg.png`, so equal stems cannot overwrite each other.
+
+Visualization saving is disabled by default (`save_vis=false`). Enable it
+with the fourth argument:
+
+```bash
+# Save masks and additional color overlays
+./sam3_pcs_app <image_dir> <engine_path.engine> 0 1
+```
+
+Overlays go to `results/vis/` and are generated from the final mask after the
+same inference. The demo's `vis_alpha` controls their fixed foreground opacity;
+background pixels keep their original color. `results/` is relative to the
+working directory. The third argument remains `benchmark`: `1` disables all
+output saving, even when `save_vis` is enabled. Changing `save_vis` on the command
+line needs neither recompilation nor an engine rebuild.
 
 The demo applies separate presence and pixel-mask thresholds to the two
 classes:
@@ -181,7 +200,7 @@ If only one class passes its own presence and mask thresholds, only that class
 is drawn. If both masks cover the same pixel, `door handle` has priority. The
 CUDA postprocessor supports a three-channel overlay with
 `VIS_SEMANTIC_SEGMENTATION`, or an efficient single-channel label map with
-`VIS_CLASS_MAP` (`0=door`, `1=door handle`, `255=background`). Construct the
+`VIS_CLASS_MAP` (`0=door`, `128=door handle`, `255=background`). Construct the
 label-map result as `CV_8UC1` before calling `pin_opencv_matrices`. Use
 `VIS_NONE` only when CPU code needs the raw logits. After a `VIS_NONE` call,
 use `semantic_logits_host()` and `presence_logits_host()` rather than relying

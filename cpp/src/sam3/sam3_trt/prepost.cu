@@ -140,7 +140,7 @@ __global__ void draw_fixed_prompt_semantic_masks(
 
                 const int result_loc = pixel_index*result_channels;
                 const float3 color =
-                    selection.class_label == 1 ? handle_color : door_color;
+                    selection.class_label == sam3_handle_label ? handle_color : door_color;
                 const float effective_alpha =
                     mask_alpha * selection.mask_probability;
 
