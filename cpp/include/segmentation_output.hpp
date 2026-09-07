@@ -24,10 +24,10 @@ inline void save_segmentation_outputs(
 
     // Keep the source extension to distinguish e.g. frame.jpg and frame.png.
 //    const std::string output_name = input_name.filename().string() + ".png";
-    const std::string output_name = input_name.stem().string() + ".png";
+    const std::string mask_name = input_name.stem().string() + "_mask.png";
     const auto mask_dir = output_dir / "masks";
     std::filesystem::create_directories(mask_dir);
-    const auto mask_path = mask_dir / output_name;
+    const auto mask_path = mask_dir / mask_name;
     if (!cv::imwrite(mask_path.string(), mask))
     {
         throw std::runtime_error("Failed to save mask: " + mask_path.string());
@@ -39,6 +39,7 @@ inline void save_segmentation_outputs(
     }
 
     // Visualize the final labels; background pixels retain the original image.
+    const std::string vis_name = input_name.stem().string() + "_vis.png";
     cv::Mat colors = image.clone();
     colors.setTo(cv::Scalar(0, 185, 118), mask == sam3_door_label);
     colors.setTo(cv::Scalar(230, 159, 0), mask == sam3_handle_label);
@@ -47,7 +48,7 @@ inline void save_segmentation_outputs(
 
     const auto vis_dir = output_dir / "vis";
     std::filesystem::create_directories(vis_dir);
-    const auto vis_path = vis_dir / output_name;
+    const auto vis_path = vis_dir / vis_name;
     if (!cv::imwrite(vis_path.string(), vis))
     {
         throw std::runtime_error("Failed to save visualization: " + vis_path.string());
