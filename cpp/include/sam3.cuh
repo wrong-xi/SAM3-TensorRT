@@ -39,7 +39,6 @@ public:
     SAM3_PCS(
         const std::string& engine_path,
         float vis_alpha,
-        SAM3_CLASS_THRESHOLDS door_thresholds,
         SAM3_CLASS_THRESHOLDS handle_thresholds);
     ~SAM3_PCS();
     bool infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type);
@@ -82,7 +81,6 @@ private:
 
     void visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type);
     const float _overlay_alpha;
-    const SAM3_CLASS_THRESHOLDS _door_thresholds;
     const SAM3_CLASS_THRESHOLDS _handle_thresholds;
 
     const std::string _engine_path;

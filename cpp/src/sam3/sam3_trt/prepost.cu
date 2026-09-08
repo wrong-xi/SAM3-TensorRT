@@ -66,8 +66,8 @@ __global__ void prepare_fixed_prompt_probabilities(
     int mask_area)
 {
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
-    const int semantic_count = 2 * mask_area;
-    if (index < semantic_count + 2)
+    const int semantic_count = mask_area;
+    if (index < semantic_count + 1)
     {
         const float logit = index < semantic_count ?
             semantic_logits[index] : presence_logits[index - semantic_count];
@@ -105,11 +105,8 @@ __global__ void draw_fixed_prompt_semantic_masks(
     int mask_width,
     int mask_height,
     float mask_alpha,
-    float door_presence_threshold,
-    float door_mask_threshold,
     float handle_presence_threshold,
     float handle_mask_threshold,
-    float3 door_color,
     float3 handle_color)
 {
     // Colors should be in 0-255 range, BGR (or the same colorspace as src).
@@ -121,9 +118,7 @@ __global__ void draw_fixed_prompt_semantic_masks(
 
     if (res_min_x < src_width && res_min_y < src_height)
     {
-        const float door_presence_probability = presence_probabilities[0];
-        const float handle_presence_probability = presence_probabilities[1];
-        const int mask_area = mask_width * mask_height;
+        const float handle_presence_probability = presence_probabilities[0];
         const float scale_x = static_cast<float>(mask_width) / src_width;
         const float scale_y = static_cast<float>(mask_height) / src_height;
 
@@ -160,19 +155,12 @@ __global__ void draw_fixed_prompt_semantic_masks(
                 const int bottom_left = y1 * mask_width + x0;
                 const int bottom_right = y1 * mask_width + x1;
 
-                const float door_mask_probability =
+                const float handle_mask_probability =
                     bilinear_probability(semantic_probabilities,
                         top_left, top_right, bottom_left, bottom_right, weight_x, weight_y);
-                const float handle_mask_probability =
-                    bilinear_probability(semantic_probabilities + mask_area,
-                        top_left, top_right, bottom_left, bottom_right, weight_x, weight_y);
                 const SemanticClassSelection selection = select_semantic_class(
-                    door_presence_probability,
-                    door_mask_probability,
                     handle_presence_probability,
                     handle_mask_probability,
-                    door_presence_threshold,
-                    door_mask_threshold,
                     handle_presence_threshold,
                     handle_mask_threshold);
 
@@ -183,8 +171,7 @@ __global__ void draw_fixed_prompt_semantic_masks(
                 }
 
                 const int result_loc = pixel_index*result_channels;
-                const float3 color =
-                    selection.class_label == sam3_handle_label ? handle_color : door_color;
+                const float3 color = handle_color;
                 const float effective_alpha =
                     mask_alpha * selection.mask_probability;
 

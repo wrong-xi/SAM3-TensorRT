@@ -109,7 +109,11 @@ docker run -it --rm \
   sam3-trt bash
 ```
 
-4) Export the fixed `door` + `door handle` model to ONNX on Windows
+4) Export the fixed `door handle` model to ONNX on Windows
+
+The `feat/fixed-door-handle` branch accepts exactly one fixed prompt. The
+two-class implementation remains on `jetson-xxx`. The models and C++ interfaces
+are not interchangeable: this branch rejects the old two-class engine.
 
 Edit `MODEL_DIR`, `SAMPLE_IMAGE`, and `IMAGE_SIZE` at the top of
 `python/onnxexport.py` if needed. The script loads the Hugging Face
@@ -122,24 +126,26 @@ python python\onnxexport.py
 ```
 
 This produces
-`python/onnx_weights_fixed/sam3_door_door_handle.onnx`. Depending on the ONNX
+`python/onnx_weights_handle/sam3_door_handle.onnx`. Depending on the ONNX
 exporter's size handling, it may also create external weight files. Copy the
-entire `onnx_weights_fixed` directory to the Jetson; files under `_weights`
+entire `onnx_weights_handle` directory to `/data/code/SAM3-TensorRT/onnx_weights_handle`
+on the Jetson; files under `_weights`
 are external ONNX initializers, not duplicate models.
 
-At the end of export, the script removes the six decoder `If` nodes emitted
-for `squeeze(-1)` that TensorRT 10.3 cannot parse. The expected message for
-this SAM3 configuration is `replaced 6 decoder squeeze If node(s)`.
+At the end of export, the script fixes decoder `If` nodes emitted for
+`squeeze(-1)` when needed for TensorRT compatibility. Single-prompt export can
+already eliminate these nodes; a replacement count of zero is not an error.
 
 The exported graph has one input and two outputs:
 
 - `pixel_values`: `[1, 3, 672, 672]`
-- `semantic_logits`: `[2, 1, 192, 192]` (`0=door`, `1=door handle`)
-- `presence_logits`: `[2, 1]`
+- `semantic_logits`: `[1, 1, 192, 192]` (the only channel is `door handle`)
+- `presence_logits`: `[1, 1]`
 
-The image encoder runs once. Its feature maps are reused by a two-item prompt
-batch for the detector and mask heads. Both text embeddings are constants in
-the ONNX graph, so C++ does not pass token IDs at runtime.
+The image encoder runs once, followed by a single-item prompt batch. Text
+features for `door handle` are precomputed constants: there is no runtime text
+input or text encoder. The new output directory does not overwrite the old
+two-class ONNX.
 
 5) Build a TensorRT engine on the Jetson
 
@@ -147,37 +153,38 @@ TensorRT engines are platform- and TensorRT-version-specific, so build the
 engine on the target Jetson rather than copying an engine built on Windows.
 
 ```bash
-trtexec \
-  --onnx=python/onnx_weights_fixed/sam3_door_door_handle.onnx \
-  --saveEngine=sam3_door_door_handle_fp16.plan \
+cd /data/code/SAM3-TensorRT
+/usr/src/tensorrt/bin/trtexec \
+  --onnx=onnx_weights_handle/sam3_door_handle.onnx \
+  --saveEngine=onnx_weights_handle/sam3_672_door_handle_fp16.engine \
   --fp16 \
-  --verbose
+  --skipInference
 ```
 
 6) Build the C++/CUDA library and sample app
 ```bash
-mkdir cpp/build && cd cpp/build
-cmake ..
-make
+cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release
+cmake --build cpp/build -j4
 ```
 
 7) Run the demo app
 ```bash
-./sam3_pcs_app <image_dir> <engine_path.engine>
+./cpp/build/sam3_pcs_app <image_dir> onnx_weights_handle/sam3_672_door_handle_fp16.engine
 ```
 
 By default, each image produces a single-channel, original-resolution PNG in
-`results/masks/`: `0=door`, `128=door handle`, `255=background`. An image with
+`results/masks/`: `128=door handle`, `255=background` (no label 0). An image with
 no selected foreground produces an all-255 mask. PNG preserves these label
-values exactly. The source extension is retained, e.g. `frame.jpg` becomes
-`results/masks/frame.jpg.png`, so equal stems cannot overwrite each other.
+values exactly. Existing stem-based naming is preserved: `frame.jpg` becomes
+`results/masks/frame_mask.png`, and its optional overlay is `results/vis/frame_vis.png`.
+Keep source stems unique within an output directory.
 
 Visualization saving is disabled by default (`save_vis=false`). Enable it
 with the fourth argument:
 
 ```bash
 # Save masks and additional color overlays
-./sam3_pcs_app <image_dir> <engine_path.engine> 0 1
+./cpp/build/sam3_pcs_app <image_dir> <single_class_engine.engine> 0 1
 ```
 
 Overlays go to `results/vis/` and are generated from the final mask after the
@@ -187,20 +194,21 @@ working directory. The third argument remains `benchmark`: `1` disables all
 output saving, even when `save_vis` is enabled. Changing `save_vis` on the command
 line needs neither recompilation nor an engine rebuild.
 
-The demo applies separate presence and pixel-mask thresholds to the two
-classes:
+The demo applies separate presence and pixel-mask thresholds to the handle:
 
 ```cpp
-const SAM3_CLASS_THRESHOLDS door_thresholds = {0.50F, 0.50F};
-const SAM3_CLASS_THRESHOLDS handle_thresholds = {0.45F, 0.55F};
-SAM3_PCS pcs(engine_path, 0.3F, door_thresholds, handle_thresholds);
+// {whole-image presence threshold, per-pixel mask threshold}
+const SAM3_CLASS_THRESHOLDS handle_thresholds = {0.5F, 0.5F};
+SAM3_PCS pcs(engine_path, 0.6F, handle_thresholds);
 ```
 
-If only one class passes its own presence and mask thresholds, only that class
-is drawn. If both masks cover the same pixel, `door handle` has priority. The
-CUDA postprocessor supports a three-channel overlay with
+Both thresholds must pass for a pixel to be marked as handle. Sigmoid runs on
+the low-resolution map once, and GPU bilinear interpolation (`align_corners=False`)
+precedes pixel thresholding. Scratch storage is one reusable mask plane plus
+one presence value (about 144 KiB at 192x192). The CUDA postprocessor supports
+a three-channel overlay with
 `VIS_SEMANTIC_SEGMENTATION`, or an efficient single-channel label map with
-`VIS_CLASS_MAP` (`0=door`, `128=door handle`, `255=background`). Construct the
+`VIS_CLASS_MAP` (`128=door handle`, `255=background`). Construct the
 label-map result as `CV_8UC1` before calling `pin_opencv_matrices`. Use
 `VIS_NONE` only when CPU code needs the raw logits. After a `VIS_NONE` call,
 use `semantic_logits_host()` and `presence_logits_host()` rather than relying
@@ -228,11 +236,15 @@ This is a very raw project and provides the crucial backend TensorRT/CUDA bits n
 ### CUDA Library Notes
 - The shared library target is `sam3_trt`.
 - Demo app: `sam3_pcs_app` (semantic/instance visualization modes).
-- Outputs include semantic segmentation and instance segmentation mask logits. If you choose `SAM3_VISUALIZATION::VIS_NONE` in your application, you need to apply sigmoid yourself.
+- This branch exports semantic and presence logits only; it does not provide instance masks. With `SAM3_VISUALIZATION::VIS_NONE`, apply sigmoid yourself.
 - The library does not support building engines. Use `trtexec` instead.
 
 ### Benchmarking
-Use the same image directory and prompt for all runs. Both paths time the model pipeline and exclude image load/save.
+Use the same image directory and prompt for all runs. The C++ benchmark mode
+excludes image load/save but includes preprocessing, inference and mask
+postprocessing. Normal mode also times PNG saving and optional visualization.
+Keep each input directory at one image resolution: the app pins buffers based
+on its first image.
 
 Huggingface + PyTorch:
 ```bash
@@ -241,7 +253,7 @@ python python/basic_script.py <image_dir>
 
 TensorRT + CUDA (benchmark mode disables output writes):
 ```bash
-./sam3_pcs_app <image_dir> <engine_path.engine> 1
+./cpp/build/sam3_pcs_app <image_dir> <single_class_engine.engine> 1 0
 ```
 
 ### ONNX Export Details
@@ -250,7 +262,7 @@ TensorRT + CUDA (benchmark mode disables output writes):
   engine input size.
 - Export uses CUDA when available and falls back to CPU.
 - SAM3 is large and may export with external weight shards; keep the entire
-  `onnx_weights_fixed/` directory together.
+  `onnx_weights_handle/` directory together.
 
 ### TensorRT Notes
 - Use `trtexec` for quick engine builds and benchmarking.

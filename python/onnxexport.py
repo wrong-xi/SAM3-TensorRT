@@ -12,9 +12,9 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODEL_DIR = Path(r"C:\data\model\sam3")
 SAMPLE_IMAGE = Path(r"C:\data\test.png")
 IMAGE_SIZE = 672
-PROMPTS = ("door", "door handle")
+PROMPTS = ("door handle",)
 VERIFY_SHARED_OUTPUTS = True
-OUTPUT_DIR = Path(__file__).resolve().parent / "onnx_weights_fixed"
+OUTPUT_DIR = Path(__file__).resolve().parent / "onnx_weights_handle"
 
 
 def load_model_and_processor():
@@ -67,7 +67,7 @@ def verify_against_independent_runs(
                 msg=lambda msg: f"presence logits differ for {prompt!r}: {msg}",
             )
 
-    print("Shared-backbone outputs match two independent full-model runs.")
+    print("Fixed-prompt outputs match the independent full-model reference.")
 
 
 def export_onnx(wrapper, pixel_values, onnx_path):
@@ -124,7 +124,7 @@ def main():
     print("presence_logits:", tuple(presence_logits.shape))
 
     OUTPUT_DIR.mkdir(exist_ok=True)
-    onnx_path = OUTPUT_DIR / "sam3_door_door_handle.onnx"
+    onnx_path = OUTPUT_DIR / "sam3_door_handle.onnx"
     export_onnx(wrapper, pixel_values, onnx_path)
     replacement_count = fix_onnx_file_for_tensorrt(onnx_path)
     print(

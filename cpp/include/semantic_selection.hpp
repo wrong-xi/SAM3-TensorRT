@@ -2,7 +2,6 @@
 
 #include <cstdint>
 
-inline constexpr std::uint8_t sam3_door_label = 0;
 inline constexpr std::uint8_t sam3_handle_label = 128;
 inline constexpr std::uint8_t sam3_background_label = 255;
 
@@ -19,12 +18,8 @@ struct SemanticClassSelection
 #endif
 
 SAM3_HOST_DEVICE inline SemanticClassSelection select_semantic_class(
-    const float door_presence_probability,
-    const float door_mask_probability,
     const float handle_presence_probability,
     const float handle_mask_probability,
-    const float door_presence_threshold,
-    const float door_mask_threshold,
     const float handle_presence_threshold,
     const float handle_mask_threshold)
 {
@@ -34,14 +29,6 @@ SAM3_HOST_DEVICE inline SemanticClassSelection select_semantic_class(
     if (handle_detected)
     {
         return {sam3_handle_label, handle_mask_probability};
-    }
-
-    const bool door_detected =
-        door_presence_probability >= door_presence_threshold &&
-        door_mask_probability >= door_mask_threshold;
-    if (door_detected)
-    {
-        return {sam3_door_label, door_mask_probability};
     }
 
     return {sam3_background_label, 0.0F};

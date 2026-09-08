@@ -93,13 +93,11 @@ int main(int argc, char* argv[])
     float millis_elapsed = 0.0; // int will overflow after ~650 hours
 
     const float vis_alpha = 0.6;
-    const SAM3_CLASS_THRESHOLDS door_thresholds = {0.5F, 0.75F};
     const SAM3_CLASS_THRESHOLDS handle_thresholds = {0.5F, 0.5F};
 
     SAM3_PCS pcs(
         epath,
         vis_alpha,
-        door_thresholds,
         handle_thresholds);
 
     cv::Mat img, result;

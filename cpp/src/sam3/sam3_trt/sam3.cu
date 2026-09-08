@@ -3,10 +3,8 @@
 SAM3_PCS::SAM3_PCS(
     const std::string& engine_path,
     const float vis_alpha,
-    const SAM3_CLASS_THRESHOLDS door_thresholds,
     const SAM3_CLASS_THRESHOLDS handle_thresholds)
     : _overlay_alpha(vis_alpha)
-    , _door_thresholds(door_thresholds)
     , _handle_thresholds(handle_thresholds)
     , _engine_path(engine_path)
 {
@@ -88,7 +86,7 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
         const int mask_area = mask_width * mask_height;
         constexpr int probability_block_size = 256;
         const int probability_blocks =
-            (2 * mask_area + 2 + probability_block_size - 1) / probability_block_size;
+            (mask_area + 1 + probability_block_size - 1) / probability_block_size;
         prepare_fixed_prompt_probabilities<<<probability_blocks, probability_block_size, 0, sam3_stream>>>(
             static_cast<float*>(output_gpu[semantic_output_index]),
             static_cast<float*>(output_gpu[presence_output_index]),
@@ -99,7 +97,7 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
         draw_fixed_prompt_semantic_masks<<<sgsize, sbsize, 0, sam3_stream>>>(
             input_ptr,
             fixed_prompt_probabilities.get(),
-            fixed_prompt_probabilities.get() + 2 * mask_area,
+            fixed_prompt_probabilities.get() + mask_area,
             gpu_result,
             input.cols,
             input.rows,
@@ -108,11 +106,8 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
             mask_width,
             mask_height,
             _overlay_alpha,
-            _door_thresholds.presence,
-            _door_thresholds.mask,
             _handle_thresholds.presence,
             _handle_thresholds.mask,
-            make_float3(0,185,118),
             make_float3(230,159,0));
         cuda_check(cudaGetLastError(), "resizing and selecting fixed-prompt masks");
     }
@@ -395,10 +390,10 @@ void SAM3_PCS::allocate_io_buffers()
 
             if (std::string(name) == "semantic_logits")
             {
-                if (dims.nbDims != 4 || dims.d[0] != 2 || dims.d[1] != 1)
+                if (dims.nbDims != 4 || dims.d[0] != 1 || dims.d[1] != 1)
                 {
                     throw std::runtime_error(
-                        "semantic_logits must have shape [2, 1, H, W]");
+                        "The single-class door handle engine requires semantic_logits [1, 1, H, W]");
                 }
                 semantic_output_index = output_index;
                 mask_height = dims.d[2];
@@ -406,10 +401,10 @@ void SAM3_PCS::allocate_io_buffers()
             }
             else if (std::string(name) == "presence_logits")
             {
-                if (dims.nbDims != 2 || dims.d[0] != 2 || dims.d[1] != 1)
+                if (dims.nbDims != 2 || dims.d[0] != 1 || dims.d[1] != 1)
                 {
                     throw std::runtime_error(
-                        "presence_logits must have shape [2, 1]");
+                        "The single-class door handle engine requires presence_logits [1, 1]");
                 }
                 presence_output_index = output_index;
             }

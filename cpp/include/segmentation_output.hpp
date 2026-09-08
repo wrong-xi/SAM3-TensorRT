@@ -41,7 +41,6 @@ inline void save_segmentation_outputs(
     // Visualize the final labels; background pixels retain the original image.
     const std::string vis_name = input_name.stem().string() + "_vis.png";
     cv::Mat colors = image.clone();
-    colors.setTo(cv::Scalar(0, 185, 118), mask == sam3_door_label);
     colors.setTo(cv::Scalar(230, 159, 0), mask == sam3_handle_label);
     cv::Mat vis;
     cv::addWeighted(image, 1.0F - vis_alpha, colors, vis_alpha, 0.0, vis);
