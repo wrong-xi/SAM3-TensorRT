@@ -3,9 +3,9 @@
 SAM3_PCS::SAM3_PCS(
     const std::string& engine_path,
     const float vis_alpha,
-    const SAM3_CLASS_THRESHOLDS handle_thresholds)
+    const float handle_mask_threshold)
     : _overlay_alpha(vis_alpha)
-    , _handle_thresholds(handle_thresholds)
+    , _handle_mask_threshold(handle_mask_threshold)
     , _engine_path(engine_path)
 {
 
@@ -86,10 +86,9 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
         const int mask_area = mask_width * mask_height;
         constexpr int probability_block_size = 256;
         const int probability_blocks =
-            (mask_area + 1 + probability_block_size - 1) / probability_block_size;
+            (mask_area + probability_block_size - 1) / probability_block_size;
         prepare_fixed_prompt_probabilities<<<probability_blocks, probability_block_size, 0, sam3_stream>>>(
             static_cast<float*>(output_gpu[semantic_output_index]),
-            static_cast<float*>(output_gpu[presence_output_index]),
             fixed_prompt_probabilities.get(),
             mask_area);
         cuda_check(cudaGetLastError(), "preparing fixed-prompt probabilities");
@@ -97,7 +96,6 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
         draw_fixed_prompt_semantic_masks<<<sgsize, sbsize, 0, sam3_stream>>>(
             input_ptr,
             fixed_prompt_probabilities.get(),
-            fixed_prompt_probabilities.get() + mask_area,
             gpu_result,
             input.cols,
             input.rows,
@@ -106,8 +104,7 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
             mask_width,
             mask_height,
             _overlay_alpha,
-            _handle_thresholds.presence,
-            _handle_thresholds.mask,
+            _handle_mask_threshold,
             make_float3(230,159,0));
         cuda_check(cudaGetLastError(), "resizing and selecting fixed-prompt masks");
     }
@@ -226,11 +223,6 @@ bool SAM3_PCS::run_blind_inference()
 const float* SAM3_PCS::semantic_logits_host() const noexcept
 {
     return static_cast<const float*>(output_cpu[semantic_output_index]);
-}
-
-const float* SAM3_PCS::presence_logits_host() const noexcept
-{
-    return static_cast<const float*>(output_cpu[presence_output_index]);
 }
 
 int SAM3_PCS::semantic_mask_width() const noexcept
@@ -367,7 +359,7 @@ void SAM3_PCS::allocate_io_buffers()
             input_cpu.push_back(cpu_buf);
             input_gpu.push_back(gpu_buf);
 
-            if (dims.nbDims == 4 && dims.d[1] == 3)
+            if (dims.nbDims == 4 && dims.d[0] == 1 && dims.d[1] == 3)
             {
                 in_width = dims.d[3];
                 in_height= dims.d[2];
@@ -377,6 +369,11 @@ void SAM3_PCS::allocate_io_buffers()
                     << " x "
                     << in_height
                     << std::endl;
+            }
+            else
+            {
+                throw std::runtime_error(
+                    "The single-image engine requires pixel_values [1, 3, H, W]");
             }
         }
         else if (mode == nvinfer1::TensorIOMode::kOUTPUT)
@@ -399,15 +396,6 @@ void SAM3_PCS::allocate_io_buffers()
                 mask_height = dims.d[2];
                 mask_width = dims.d[3];
             }
-            else if (std::string(name) == "presence_logits")
-            {
-                if (dims.nbDims != 2 || dims.d[0] != 1 || dims.d[1] != 1)
-                {
-                    throw std::runtime_error(
-                        "The single-class door handle engine requires presence_logits [1, 1]");
-                }
-                presence_output_index = output_index;
-            }
         }
         else
         {
@@ -426,16 +414,16 @@ void SAM3_PCS::allocate_io_buffers()
         throw std::runtime_error(
             "The fixed-prompt engine must have only the pixel_values input");
     }
-    if (semantic_output_index < 0 || presence_output_index < 0)
+    if (semantic_output_index < 0 || _output_names.size() != 1)
     {
         throw std::runtime_error(
-            "The engine must expose semantic_logits and presence_logits outputs");
+            "The engine must expose only semantic_logits; re-export the semantic-only ONNX and rebuild the engine");
     }
 
     // Reuse low-resolution GPU probabilities; keep raw engine logits untouched.
     float* probabilities = nullptr;
     cuda_check(cudaMalloc(&probabilities,
-        output_sizes[semantic_output_index] + output_sizes[presence_output_index]),
+        output_sizes[semantic_output_index]),
         "allocating fixed-prompt probability buffer");
     fixed_prompt_probabilities.reset(probabilities);
 }

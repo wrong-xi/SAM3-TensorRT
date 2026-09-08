@@ -20,11 +20,6 @@ typedef enum {
 } SAM3_VISUALIZATION;
 
 typedef struct {
-    float presence;
-    float mask;
-} SAM3_CLASS_THRESHOLDS;
-
-typedef struct {
     float score;
     int box_x, box_y, box_w, box_h;
     std::vector<int> mask_x;

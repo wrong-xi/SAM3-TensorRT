@@ -18,13 +18,10 @@ struct SemanticClassSelection
 #endif
 
 SAM3_HOST_DEVICE inline SemanticClassSelection select_semantic_class(
-    const float handle_presence_probability,
     const float handle_mask_probability,
-    const float handle_presence_threshold,
     const float handle_mask_threshold)
 {
     const bool handle_detected =
-        handle_presence_probability >= handle_presence_threshold &&
         handle_mask_probability >= handle_mask_threshold;
     if (handle_detected)
     {

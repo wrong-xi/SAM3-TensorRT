@@ -61,16 +61,13 @@ __global__ void pre_process_sam3(
 
 __global__ void prepare_fixed_prompt_probabilities(
     const float* semantic_logits,
-    const float* presence_logits,
     float* probabilities,
     int mask_area)
 {
     const int index = blockIdx.x * blockDim.x + threadIdx.x;
-    const int semantic_count = mask_area;
-    if (index < semantic_count + 1)
+    if (index < mask_area)
     {
-        const float logit = index < semantic_count ?
-            semantic_logits[index] : presence_logits[index - semantic_count];
+        const float logit = semantic_logits[index];
         probabilities[index] = 1.0F / (1.0F + expf(-logit));
     }
 }
@@ -96,7 +93,6 @@ __device__ float bilinear_probability(const float* probabilities,
 __global__ void draw_fixed_prompt_semantic_masks(
     const uint8_t* src,
     const float* semantic_probabilities,
-    const float* presence_probabilities,
     uint8_t* result,
     int src_width,
     int src_height,
@@ -105,7 +101,6 @@ __global__ void draw_fixed_prompt_semantic_masks(
     int mask_width,
     int mask_height,
     float mask_alpha,
-    float handle_presence_threshold,
     float handle_mask_threshold,
     float3 handle_color)
 {
@@ -118,7 +113,6 @@ __global__ void draw_fixed_prompt_semantic_masks(
 
     if (res_min_x < src_width && res_min_y < src_height)
     {
-        const float handle_presence_probability = presence_probabilities[0];
         const float scale_x = static_cast<float>(mask_width) / src_width;
         const float scale_y = static_cast<float>(mask_height) / src_height;
 
@@ -159,9 +153,7 @@ __global__ void draw_fixed_prompt_semantic_masks(
                     bilinear_probability(semantic_probabilities,
                         top_left, top_right, bottom_left, bottom_right, weight_x, weight_y);
                 const SemanticClassSelection selection = select_semantic_class(
-                    handle_presence_probability,
                     handle_mask_probability,
-                    handle_presence_threshold,
                     handle_mask_threshold);
 
                 if (result_channels == 1)

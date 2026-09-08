@@ -23,17 +23,15 @@ __global__ void pre_process_sam3(
     int dst_width,
     int dst_height);
 
-// probabilities contains one handle mask plane followed by its presence probability.
+// probabilities contains one handle mask plane.
 __global__ void prepare_fixed_prompt_probabilities(
     const float* semantic_logits,
-    const float* presence_logits,
     float* probabilities,
     int mask_area);
 
 __global__ void draw_fixed_prompt_semantic_masks(
     const uint8_t* src,
     const float* semantic_probabilities,
-    const float* presence_probabilities,
     uint8_t* result,
     int src_width,
     int src_height,
@@ -42,7 +40,6 @@ __global__ void draw_fixed_prompt_semantic_masks(
     int mask_width,
     int mask_height,
     float mask_alpha,
-    float handle_presence_threshold,
     float handle_mask_threshold,
     float3 handle_color);
 

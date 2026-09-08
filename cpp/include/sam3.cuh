@@ -39,13 +39,12 @@ public:
     SAM3_PCS(
         const std::string& engine_path,
         float vis_alpha,
-        SAM3_CLASS_THRESHOLDS handle_thresholds);
+        float handle_mask_threshold);
     ~SAM3_PCS();
     bool infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type);
     bool run_blind_inference();
     void pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat);
     const float* semantic_logits_host() const noexcept;
-    const float* presence_logits_host() const noexcept;
     int semantic_mask_width() const noexcept;
     int semantic_mask_height() const noexcept;
     std::vector<void*> output_cpu;
@@ -58,7 +57,6 @@ private:
     int in_width, in_height, opencv_inbytes, opencv_resultbytes;
     int mask_width, mask_height;
     int semantic_output_index = -1;
-    int presence_output_index = -1;
 
     std::vector<void*> input_cpu;
     std::vector<void*> input_gpu;
@@ -81,7 +79,7 @@ private:
 
     void visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type);
     const float _overlay_alpha;
-    const SAM3_CLASS_THRESHOLDS _handle_thresholds;
+    const float _handle_mask_threshold;
 
     const std::string _engine_path;
 

@@ -44,7 +44,7 @@ def verify_against_independent_runs(
     attention_mask,
 ):
     with torch.no_grad():
-        shared_semantic, shared_presence = wrapper(pixel_values)
+        shared_semantic = wrapper(pixel_values)
 
         for prompt_index, prompt in enumerate(PROMPTS):
             reference = model(
@@ -59,13 +59,6 @@ def verify_against_independent_runs(
                 atol=1e-3,
                 msg=lambda msg: f"semantic logits differ for {prompt!r}: {msg}",
             )
-            torch.testing.assert_close(
-                shared_presence[prompt_index : prompt_index + 1],
-                reference.presence_logits,
-                rtol=1e-3,
-                atol=1e-3,
-                msg=lambda msg: f"presence logits differ for {prompt!r}: {msg}",
-            )
 
     print("Fixed-prompt outputs match the independent full-model reference.")
 
@@ -76,7 +69,7 @@ def export_onnx(wrapper, pixel_values, onnx_path):
         (pixel_values,),
         str(onnx_path),
         input_names=["pixel_values"],
-        output_names=["semantic_logits", "presence_logits"],
+        output_names=["semantic_logits"],
         dynamo=False,
         opset_version=17,
     )
@@ -119,12 +112,11 @@ def main():
         )
 
     with torch.no_grad():
-        semantic_logits, presence_logits = wrapper(pixel_values)
+        semantic_logits = wrapper(pixel_values)
     print("semantic_logits:", tuple(semantic_logits.shape))
-    print("presence_logits:", tuple(presence_logits.shape))
 
     OUTPUT_DIR.mkdir(exist_ok=True)
-    onnx_path = OUTPUT_DIR / "sam3_door_handle.onnx"
+    onnx_path = OUTPUT_DIR / "sam3_door_handle_semantic.onnx"
     export_onnx(wrapper, pixel_values, onnx_path)
     replacement_count = fix_onnx_file_for_tensorrt(onnx_path)
     print(
