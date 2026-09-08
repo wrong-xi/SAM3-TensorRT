@@ -19,6 +19,37 @@ static void cuda_check(cudaError_t err, const char* msg)
     }
 }
 
+// Timing-enabled events are owned by the model and reused for every frame.
+class CudaTimingEvent
+{
+public:
+    CudaTimingEvent()
+    {
+        cuda_check(cudaEventCreate(&event), "creating CUDA timing event");
+    }
+    ~CudaTimingEvent() { cudaEventDestroy(event); }
+    CudaTimingEvent(const CudaTimingEvent&) = delete;
+    CudaTimingEvent& operator=(const CudaTimingEvent&) = delete;
+    CudaTimingEvent(CudaTimingEvent&&) = delete;
+    CudaTimingEvent& operator=(CudaTimingEvent&&) = delete;
+
+    void record(cudaStream_t stream) const
+    {
+        cuda_check(cudaEventRecord(event, stream), "recording CUDA timing event");
+    }
+    // The caller synchronizes once after the last event, never between stages.
+    float elapsed_since(const CudaTimingEvent& start) const
+    {
+        float milliseconds = 0.0F;
+        cuda_check(cudaEventElapsedTime(&milliseconds, start.event, event),
+            "reading CUDA event elapsed time");
+        return milliseconds;
+    }
+
+private:
+    cudaEvent_t event = nullptr;
+};
+
 class TRTLogger : public nvinfer1::ILogger
 {
     public:
@@ -47,6 +78,8 @@ public:
     const float* semantic_logits_host() const noexcept;
     int semantic_mask_width() const noexcept;
     int semantic_mask_height() const noexcept;
+    // Valid after a successful synchronous inference call; all values are ms.
+    Sam3GpuTimings last_gpu_timings() const noexcept;
     std::vector<void*> output_cpu;
 
 private:
@@ -54,6 +87,10 @@ private:
     cudaStream_t sam3_stream;
     dim3 bsize;
     dim3 gsize;
+    CudaTimingEvent copy_start, preprocess_start, preprocess_end;
+    CudaTimingEvent tensorrt_end, postprocess_end, copy_end;
+    Sam3GpuTimings gpu_timings;
+    void collect_gpu_timings(SAM3_VISUALIZATION vis_type);
     int in_width, in_height, opencv_inbytes, opencv_resultbytes;
     int mask_width, mask_height;
     int semantic_output_index = -1;

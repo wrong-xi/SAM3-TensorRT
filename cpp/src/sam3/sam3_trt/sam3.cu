@@ -114,6 +114,8 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
             "The fixed-prompt engine does not export instance masks");
     }
 
+    postprocess_end.record(sam3_stream);
+
     if (!is_zerocopy && vis_type == SAM3_VISUALIZATION::VIS_NONE)
     {
         for (size_t output_index = 0; output_index < output_gpu.size(); ++output_index)
@@ -128,16 +130,16 @@ void SAM3_PCS::visualize_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VIS
     }
     else if (!is_zerocopy)
     {
-        cudaMemcpyAsync(
+        cuda_check(cudaMemcpyAsync(
             (void*)result.data, 
             (void*)gpu_result, 
             opencv_resultbytes,
             cudaMemcpyDeviceToHost, 
-            sam3_stream);
+            sam3_stream), "copying SAM3 mask to the host");
     }
 
-    // if is_zerocopy, there is no need to do any synchronization/copy
-    // to make the result visible to the CPU
+    copy_end.record(sam3_stream);
+    // The inference caller synchronizes before accessing timings or host data.
 }
 
 bool SAM3_PCS::infer_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type)
@@ -145,11 +147,13 @@ bool SAM3_PCS::infer_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALI
     gsize.x = (in_width + bsize.x - 1) / (THREAD_COARSENING_FACTOR*bsize.x);
     gsize.y = (in_height + bsize.y - 1) / (THREAD_COARSENING_FACTOR*bsize.y);
 
+    copy_start.record(sam3_stream);
     cuda_check(
         cudaMemcpyAsync(
             opencv_input, input.data, opencv_inbytes, cudaMemcpyHostToDevice, sam3_stream)
         , " async memcpy of opencv image");
 
+    preprocess_start.record(sam3_stream);
     pre_process_sam3<<<gsize, bsize, 0, sam3_stream>>>(
         static_cast<uint8_t*>(opencv_input),
         static_cast<float*>(input_gpu[image_index]),
@@ -159,10 +163,16 @@ bool SAM3_PCS::infer_on_dGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALI
         in_width,
         in_height);
     
+    preprocess_end.record(sam3_stream);
     bool res = trt_ctx->enqueueV3(sam3_stream);
+    tensorrt_end.record(sam3_stream);
 
     visualize_on_dGPU(input, result, vis_type);
-    cudaStreamSynchronize(sam3_stream);
+    cuda_check(cudaStreamSynchronize(sam3_stream), "waiting for SAM3 inference");
+    if (res)
+    {
+        collect_gpu_timings(vis_type);
+    }
     return res;
 }
 
@@ -171,6 +181,8 @@ bool SAM3_PCS::infer_on_iGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALI
     gsize.x = (in_width + bsize.x - 1) / (THREAD_COARSENING_FACTOR*bsize.x);
     gsize.y = (in_height + bsize.y - 1) / (THREAD_COARSENING_FACTOR*bsize.y);
 
+    copy_start.record(sam3_stream);
+    preprocess_start.record(sam3_stream);
     pre_process_sam3<<<gsize, bsize, 0, sam3_stream>>>(
         zc_input,
         static_cast<float*>(input_gpu[image_index]),
@@ -180,15 +192,22 @@ bool SAM3_PCS::infer_on_iGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALI
         in_width,
         in_height);
     
+    preprocess_end.record(sam3_stream);
     bool res = trt_ctx->enqueueV3(sam3_stream);
+    tensorrt_end.record(sam3_stream);
     visualize_on_dGPU(input, result, vis_type);
-    cudaStreamSynchronize(sam3_stream);
+    cuda_check(cudaStreamSynchronize(sam3_stream), "waiting for SAM3 inference");
+    if (res)
+    {
+        collect_gpu_timings(vis_type);
+    }
 
     return res;
 }
 
 bool SAM3_PCS::infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type)
 {
+    gpu_timings = {};
     if (input.size() != result.size())
     {
         throw std::runtime_error("Input and result matrices must have equal sizes");
@@ -215,9 +234,33 @@ bool SAM3_PCS::infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUAL
 // only for engine benchmarking purposes
 bool SAM3_PCS::run_blind_inference()
 {
+    gpu_timings = {};
+    preprocess_end.record(sam3_stream);
     bool res = trt_ctx->enqueueV3(sam3_stream);
-    cudaStreamSynchronize(sam3_stream);
+    tensorrt_end.record(sam3_stream);
+    cuda_check(cudaStreamSynchronize(sam3_stream), "waiting for blind SAM3 inference");
+    if (res)
+    {
+        gpu_timings.tensorrt_ms = tensorrt_end.elapsed_since(preprocess_end);
+        gpu_timings.total_ms = gpu_timings.tensorrt_ms;
+    }
     return res;
+}
+
+void SAM3_PCS::collect_gpu_timings(SAM3_VISUALIZATION vis_type)
+{
+    gpu_timings.preprocess_ms = preprocess_end.elapsed_since(preprocess_start);
+    gpu_timings.tensorrt_ms = tensorrt_end.elapsed_since(preprocess_end);
+    gpu_timings.postprocess_ms = vis_type == SAM3_VISUALIZATION::VIS_NONE ?
+        0.0F : postprocess_end.elapsed_since(tensorrt_end);
+    gpu_timings.h2d_ms = is_zerocopy ? 0.0F : preprocess_start.elapsed_since(copy_start);
+    gpu_timings.d2h_ms = is_zerocopy ? 0.0F : copy_end.elapsed_since(postprocess_end);
+    gpu_timings.total_ms = copy_end.elapsed_since(copy_start);
+}
+
+Sam3GpuTimings SAM3_PCS::last_gpu_timings() const noexcept
+{
+    return gpu_timings;
 }
 
 const float* SAM3_PCS::semantic_logits_host() const noexcept

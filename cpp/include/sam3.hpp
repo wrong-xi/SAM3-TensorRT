@@ -19,6 +19,16 @@ typedef enum {
     VIS_INSTANCE_SEGMENTATION
 } SAM3_VISUALIZATION;
 
+struct Sam3GpuTimings
+{
+    float preprocess_ms = 0.0F;
+    float tensorrt_ms = 0.0F;
+    float postprocess_ms = 0.0F;
+    float h2d_ms = 0.0F;
+    float d2h_ms = 0.0F;
+    float total_ms = 0.0F;
+};
+
 typedef struct {
     float score;
     int box_x, box_y, box_w, box_h;

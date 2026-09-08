@@ -253,6 +253,38 @@ postprocessing. Normal mode also times PNG saving and optional visualization.
 Keep each input directory at one image resolution: the app pins buffers based
 on its first image.
 
+The C++ app warms up the complete inference pipeline five times on the first
+image, without saving output or adding timing samples. It then processes every
+input image, including that first image. Cumulative averages are printed every
+10 images, with a final summary even for fewer than 10 images.
+
+GPU timings use reusable, timing-enabled `cudaEvent` objects on `sam3_stream`.
+There is one checked stream synchronization per frame, after all GPU work and
+copies are submitted; there are no synchronizations between measured stages.
+
+| Field (ms/image) | Measurement |
+| --- | --- |
+| `preprocess` | CUDA image resize, color conversion and normalization |
+| `TensorRT` | GPU stream interval surrounding `enqueueV3`, not CPU enqueue duration |
+| `postprocess` | Low-resolution sigmoid, bilinear upsampling and mask/overlay selection |
+| `H2D`, `D2H` | Explicit image/output copies on dGPU, excluded from the three stages |
+| `total` | GPU stream interval spanning copies and the three stages |
+| `CPU wall (infer+save)` | `steady_clock` elapsed time including inference, synchronization and optional output saving; excludes image reading/decoding |
+
+On Jetson's zero-copy path, `H2D` and `D2H` are zero because there are no explicit
+copies. Shared-memory access costs remain part of the kernels that perform them.
+Event intervals measure elapsed GPU-stream time, not the sum of individual
+kernel active times: GPU contention and host submission gaps can affect them.
+The total may differ slightly from the sum because of empty-stage event gaps
+and display rounding. Avoid other GPU workloads when comparing measurements.
+
+After a successful `infer_on_image`, `last_gpu_timings()` returns the latest
+frame's `Sam3GpuTimings` (milliseconds). `VIS_NONE` has zero postprocess time;
+`run_blind_inference()` reports only TensorRT and total time. Statistics are
+collected by the app, so library users need not perform the app's warmup policy.
+This instrumentation changes only C++; reuse the current semantic-only engine
+after recompiling the application and library.
+
 Huggingface + PyTorch:
 ```bash
 python python/basic_script.py <image_dir>
@@ -261,6 +293,19 @@ python python/basic_script.py <image_dir>
 TensorRT + CUDA (benchmark mode disables output writes):
 ```bash
 ./cpp/build/sam3_pcs_app <image_dir> <single_class_engine.engine> 1 0
+```
+
+Timing integration tests (requires a compatible engine, a PNG image, Python
+with NumPy/OpenCV, and the C++ dependencies):
+
+```bash
+python3 cpp/tests/test_timing_cli.py --app cpp/build/sam3_pcs_app \
+  --engine <single_class_engine.engine> --image <sample.png> --work-dir cpp/build -v
+g++ -std=c++17 cpp/tests/test_gpu_timing.cpp -Icpp/include -I/usr/local/cuda/include \
+  $(pkg-config --cflags --libs opencv4) -Lcpp/build -lsam3_trt \
+  -L/usr/local/cuda/lib64 -lcudart -lnvinfer -o cpp/build/test_gpu_timing
+LD_LIBRARY_PATH="$PWD/cpp/build:$LD_LIBRARY_PATH" \
+  ./cpp/build/test_gpu_timing <single_class_engine.engine> <sample.png>
 ```
 
 ### ONNX Export Details

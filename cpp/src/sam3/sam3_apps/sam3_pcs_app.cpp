@@ -1,6 +1,7 @@
 #include "sam3.hpp"
 #include "sam3.cuh"
 #include "segmentation_output.hpp"
+#include <array>
 #include <chrono>
 #include <thread>
 #include <opencv2/imgproc.hpp>
@@ -54,6 +55,23 @@ void infer_one_image(SAM3_PCS& pcs,
     save_segmentation_outputs(img, mask, "results", input_name, save_vis, vis_alpha);
 }
 
+void report_timing(int count, double cpu_wall_ms,
+    const std::array<double, 6>& gpu_totals, bool final_report)
+{
+    const char* prefix = final_report ? "Summary" : "Processed";
+    if (count == 0)
+    {
+        printf("%s 0 images (no timing samples)\n", prefix);
+        return;
+    }
+    printf("%s %d images | CPU wall (infer+save): %.3f ms/image\n",
+        prefix, count, cpu_wall_ms / count);
+    printf("  GPU cudaEvent avg (ms/image): preprocess=%.3f TensorRT=%.3f "
+        "postprocess=%.3f H2D=%.3f D2H=%.3f total=%.3f\n",
+        gpu_totals[0] / count, gpu_totals[1] / count, gpu_totals[2] / count,
+        gpu_totals[3] / count, gpu_totals[4] / count, gpu_totals[5] / count);
+}
+
 int main(int argc, char* argv[])
 {
     if (argc < 3 || argc > 5)
@@ -87,10 +105,9 @@ int main(int argc, char* argv[])
     std::cout << "Benchmarking: " << benchmark << std::endl;
     std::cout << "Save visualization: " << (save_vis && !benchmark) << std::endl;
 
-    auto start = std::chrono::system_clock::now();
-    auto end = std::chrono::system_clock::now();
-    std::chrono::duration<float> diff;
-    float millis_elapsed = 0.0; // int will overflow after ~650 hours
+    double cpu_wall_ms = 0.0;
+    std::array<double, 6> gpu_totals{};
+    constexpr int warmup_iterations = 5;
 
     const float vis_alpha = 0.6;
     const float handle_mask_threshold = 0.5F;
@@ -118,23 +135,37 @@ int main(int argc, char* argv[])
                 read_image_into_buffer(image_path, raw_bytes, img);
                 result = cv::Mat(img.size(), CV_8UC1, cv::Scalar(sam3_background_label));
                 pcs.pin_opencv_matrices(img, result);
+                for (int iteration = 0; iteration < warmup_iterations; ++iteration)
+                {
+                    infer_one_image(pcs, img, result, fname.path().filename(),
+                        true, false, vis_alpha);
+                }
+                printf("Warmup complete: %d iterations (excluded; no output saved)\n",
+                    warmup_iterations);
             }
             else
             {
                 read_image_into_buffer(image_path, raw_bytes, img);
             }
-            start = std::chrono::system_clock::now();
+            const auto start = std::chrono::steady_clock::now();
             infer_one_image(pcs, img, result, fname.path().filename(), benchmark, save_vis, vis_alpha);
+            const auto end = std::chrono::steady_clock::now();
+            cpu_wall_ms += std::chrono::duration<double, std::milli>(end - start).count();
+            const auto timings = pcs.last_gpu_timings();
+            const std::array<double, 6> frame_times = {timings.preprocess_ms,
+                timings.tensorrt_ms, timings.postprocess_ms, timings.h2d_ms,
+                timings.d2h_ms, timings.total_ms};
+            for (size_t stage = 0; stage < gpu_totals.size(); ++stage)
+            {
+                gpu_totals[stage] += frame_times[stage];
+            }
             num_images_read++;
-            end = std::chrono::system_clock::now();
-            diff = end - start;
-            millis_elapsed += (diff.count() * 1000);
 
             if (num_images_read>0 && num_images_read%10==0)
             {
-                float msec_per_image = millis_elapsed/num_images_read;
-                printf("Processed %d images at %f msec/image\n", num_images_read, msec_per_image);
+                report_timing(num_images_read, cpu_wall_ms, gpu_totals, false);
             }
         }
     }
+    report_timing(num_images_read, cpu_wall_ms, gpu_totals, true);
 }

@@ -12,4 +12,8 @@ onnx_weights/
 onnx_weights2/
 onnx_weights_fixed/
 onnx_weights_handle/
-cpp/tests/
+cpp/tests/*
+!cpp/tests/test_timing_cli.py
+!cpp/tests/test_gpu_timing.cpp
+python/test_fixed_prompt_wrapper.py
+python/test_onnx_tensorrt_fix.py
