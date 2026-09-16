@@ -179,7 +179,14 @@ By default, each image produces a single-channel, original-resolution PNG in
 no selected foreground produces an all-255 mask. PNG preserves these label
 values exactly. Existing stem-based naming is preserved: `frame.jpg` becomes
 `results/masks/frame_mask.png`, and its optional overlay is `results/vis/frame_vis.png`.
-Keep source stems unique within an output directory.
+Input subdirectories are scanned recursively and their paths relative to the
+input root are preserved: `A/B/frame.jpg` becomes
+`results/masks/A/B/frame_mask.png` and, when enabled,
+`results/vis/A/B/frame_vis.png`. Images in different subdirectories may share
+the same name. Keep source stems unique within each input subdirectory.
+Keep `results/` outside the input directory so generated images are not read
+as inputs. All input images, including those in subdirectories, must use the
+same resolution, as required by the existing reusable inference buffers.
 
 Visualization saving is disabled by default (`save_vis=false`). Enable it
 with the fourth argument:

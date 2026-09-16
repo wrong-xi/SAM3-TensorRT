@@ -25,7 +25,7 @@ inline void save_segmentation_outputs(
     // Keep the source extension to distinguish e.g. frame.jpg and frame.png.
 //    const std::string output_name = input_name.filename().string() + ".png";
     const std::string mask_name = input_name.stem().string() + "_mask.png";
-    const auto mask_dir = output_dir / "masks";
+    const auto mask_dir = output_dir / "masks" / input_name.parent_path();
     std::filesystem::create_directories(mask_dir);
     const auto mask_path = mask_dir / mask_name;
     if (!cv::imwrite(mask_path.string(), mask))
@@ -45,7 +45,7 @@ inline void save_segmentation_outputs(
     cv::Mat vis;
     cv::addWeighted(image, 1.0F - vis_alpha, colors, vis_alpha, 0.0, vis);
 
-    const auto vis_dir = output_dir / "vis";
+    const auto vis_dir = output_dir / "vis" / input_name.parent_path();
     std::filesystem::create_directories(vis_dir);
     const auto vis_path = vis_dir / vis_name;
     if (!cv::imwrite(vis_path.string(), vis))

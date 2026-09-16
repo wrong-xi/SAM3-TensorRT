@@ -122,11 +122,12 @@ int main(int argc, char* argv[])
 
     int num_images_read=0;
 
-    for (const auto& fname : std::filesystem::directory_iterator(in_dir))
+    for (const auto& fname : std::filesystem::recursive_directory_iterator(in_dir))
     {
         if (std::filesystem::is_regular_file(fname.path())) 
         {
             const std::string image_path = fname.path().string();
+            const auto input_name = fname.path().lexically_relative(in_dir);
             
             if (num_images_read==0)
             {
@@ -137,7 +138,7 @@ int main(int argc, char* argv[])
                 pcs.pin_opencv_matrices(img, result);
                 for (int iteration = 0; iteration < warmup_iterations; ++iteration)
                 {
-                    infer_one_image(pcs, img, result, fname.path().filename(),
+                    infer_one_image(pcs, img, result, input_name,
                         true, false, vis_alpha);
                 }
                 printf("Warmup complete: %d iterations (excluded; no output saved)\n",
@@ -148,7 +149,7 @@ int main(int argc, char* argv[])
                 read_image_into_buffer(image_path, raw_bytes, img);
             }
             const auto start = std::chrono::steady_clock::now();
-            infer_one_image(pcs, img, result, fname.path().filename(), benchmark, save_vis, vis_alpha);
+            infer_one_image(pcs, img, result, input_name, benchmark, save_vis, vis_alpha);
             const auto end = std::chrono::steady_clock::now();
             cpu_wall_ms += std::chrono::duration<double, std::milli>(end - start).count();
             const auto timings = pcs.last_gpu_timings();
