@@ -107,11 +107,12 @@ int main(int argc, char* argv[])
 
     int num_images_read=0;
 
-    for (const auto& fname : std::filesystem::directory_iterator(in_dir))
+    for (const auto& fname : std::filesystem::recursive_directory_iterator(in_dir))
     {
         if (std::filesystem::is_regular_file(fname.path())) 
         {
             const std::string image_path = fname.path().string();
+            const auto input_name = fname.path().lexically_relative(in_dir);
             
             if (num_images_read==0)
             {
@@ -126,7 +127,7 @@ int main(int argc, char* argv[])
                 read_image_into_buffer(image_path, raw_bytes, img);
             }
             start = std::chrono::system_clock::now();
-            infer_one_image(pcs, img, result, fname.path().filename(), benchmark, save_vis, vis_alpha);
+            infer_one_image(pcs, img, result, input_name, benchmark, save_vis, vis_alpha);
             num_images_read++;
             end = std::chrono::system_clock::now();
             diff = end - start;
