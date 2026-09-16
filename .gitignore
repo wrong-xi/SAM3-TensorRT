@@ -4,3 +4,14 @@
 onnx_weights/
 onnx_weights2/
 onnx_weights_fixed/
+build*/
+__pycache__/
+engines*/
+tests*/
+*.exe
+*.out
+*.engine
+*.onnx
+*.onnx.data
+*.app
+.idea/
