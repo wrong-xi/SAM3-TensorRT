@@ -1,11 +1,12 @@
+import argparse
 from pathlib import Path
 
 import torch
+from torch.onnx import symbolic_helper, symbolic_opset11
 from PIL import Image
 from transformers.models.sam3 import Sam3Config, Sam3Model, Sam3Processor
 
 from fixed_prompt_wrapper import FixedPromptSam3Wrapper
-from onnx_tensorrt_fix import fix_onnx_file_for_tensorrt
 
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -44,7 +45,8 @@ def verify_against_independent_runs(
     attention_mask,
 ):
     with torch.no_grad():
-        shared_semantic = wrapper(pixel_values)
+        shared = wrapper(pixel_values)
+        shared = shared if isinstance(shared, tuple) else (shared,)
 
         for prompt_index, prompt in enumerate(PROMPTS):
             reference = model(
@@ -52,30 +54,56 @@ def verify_against_independent_runs(
                 input_ids=input_ids[prompt_index : prompt_index + 1],
                 attention_mask=attention_mask[prompt_index : prompt_index + 1],
             )
-            torch.testing.assert_close(
-                shared_semantic[prompt_index : prompt_index + 1],
-                reference.semantic_seg,
-                rtol=1e-3,
-                atol=1e-3,
-                msg=lambda msg: f"semantic logits differ for {prompt!r}: {msg}",
-            )
+            expected = wrapper.select_outputs(reference)
+            expected = expected if isinstance(expected, tuple) else (expected,)
+            for name, actual, target in zip(wrapper.output_names, shared, expected):
+                if not torch.isfinite(actual).all() or not torch.isfinite(target).all():
+                    raise ValueError(f"Non-finite output: {name}")
+                torch.testing.assert_close(
+                    actual[prompt_index : prompt_index + 1], target,
+                    rtol=1e-3, atol=1e-3,
+                    msg=lambda msg: f"{name} differs for {prompt!r}: {msg}",
+                )
 
     print("Fixed-prompt outputs match the independent full-model reference.")
 
 
+def _static_squeeze(g, value, dim=None):
+    # 本脚本只导出固定尺寸。使用原始 trace 的形状，避免 ONNX 中间
+    # 形状推导丢失末维信息后生成 Squeeze/Identity 两种秩的 If。
+    if dim is not None and symbolic_helper._is_constant(dim):
+        axis = symbolic_helper._get_const(dim, "i", "dim")
+        sizes = g.original_node.inputsAt(0).type().sizes()
+        if sizes is not None and -len(sizes) <= axis < len(sizes):
+            size = sizes[axis]
+            if size == 1:
+                return symbolic_helper._squeeze_helper(g, value, [axis])
+            if size is not None:
+                return value
+    return symbolic_opset11.squeeze(g, value, dim)
+
+
 def export_onnx(wrapper, pixel_values, onnx_path):
-    torch.onnx.export(
-        wrapper,
-        (pixel_values,),
-        str(onnx_path),
-        input_names=["pixel_values"],
-        output_names=["semantic_logits"],
-        dynamo=False,
-        opset_version=17,
-    )
+    torch.onnx.register_custom_op_symbolic("aten::squeeze", _static_squeeze, 17)
+    try:
+        torch.onnx.export(
+            wrapper,
+            (pixel_values,),
+            str(onnx_path),
+            input_names=["pixel_values"],
+            output_names=list(wrapper.output_names),
+            dynamo=False,
+            opset_version=17,
+        )
+    finally:
+        torch.onnx.unregister_custom_op_symbolic("aten::squeeze", 17)
 
 
 def main():
+    parser = argparse.ArgumentParser(description="导出固定 door handle 提示的 SAM3")
+    parser.add_argument("--mode", choices=("semantic", "instance"), default="semantic")
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    args = parser.parse_args()
     model, processor = load_model_and_processor()
 
     image = Image.open(SAMPLE_IMAGE).convert("RGB")
@@ -96,6 +124,7 @@ def main():
         model,
         text_embeds,
         attention_mask,
+        output_mode=args.mode,
     ).to(DEVICE).eval()
 
     print("prompts:", PROMPTS)
@@ -112,17 +141,15 @@ def main():
         )
 
     with torch.no_grad():
-        semantic_logits = wrapper(pixel_values)
-    print("semantic_logits:", tuple(semantic_logits.shape))
+        outputs = wrapper(pixel_values)
+    outputs = outputs if isinstance(outputs, tuple) else (outputs,)
+    for name, tensor in zip(wrapper.output_names, outputs):
+        print(f"{name}:", tuple(tensor.shape))
 
-    OUTPUT_DIR.mkdir(exist_ok=True)
-    onnx_path = OUTPUT_DIR / "sam3_door_handle_semantic.onnx"
-    export_onnx(wrapper, pixel_values, onnx_path)
-    replacement_count = fix_onnx_file_for_tensorrt(onnx_path)
-    print(
-        "TensorRT compatibility fix:",
-        f"replaced {replacement_count} decoder squeeze If node(s)",
-    )
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    onnx_path = args.output_dir / f"sam3_door_handle_{args.mode}.onnx"
+    with torch.no_grad():
+        export_onnx(wrapper, pixel_values, onnx_path)
     print(f"Exported to {onnx_path}")
 
 

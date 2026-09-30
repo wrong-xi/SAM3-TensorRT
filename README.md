@@ -135,9 +135,9 @@ entire `onnx_weights_handle` directory to `/data/code/SAM3-TensorRT/onnx_weights
 on the Jetson; files under `_weights`
 are external ONNX initializers, not duplicate models.
 
-At the end of export, the script fixes decoder `If` nodes emitted for
-`squeeze(-1)` when needed for TensorRT compatibility. Single-prompt export can
-already eliminate these nodes; a replacement count of zero is not an error.
+For this fixed-size export, the exporter uses traced tensor dimensions to emit
+`Squeeze` directly when the selected dimension is one. This avoids rank-changing
+`If` branches without a separate ONNX repair script.
 
 The exported graph has one input and one output:
 
@@ -238,9 +238,8 @@ This is a very raw project and provides the crucial backend TensorRT/CUDA bits n
 ## Troubleshooting
 - **Access errors:** Make sure your `HF_TOKEN` has access to `facebook/sam3`.
 - **ONNX export fails:** Install `transformers` from source if SAM3 is missing.
-- **TensorRT `/sam3/detr_decoder/If` parse error:** Re-export with the current
-  `python/onnxexport.py`; it applies the TensorRT compatibility rewrite after
-  export.
+- **TensorRT squeeze `If` parse error:** Re-export with the current
+  `python/onnxexport.py`; fixed-size squeeze handling is applied during export.
 - **Missing external ONNX data:** If export created an `_weights` directory,
   copy it together with the `.onnx` file without changing their relative paths.
 - **C++ build errors:** Confirm CUDA, TensorRT, and OpenCV are installed and discoverable via `pkg-config`.
