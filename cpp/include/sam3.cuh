@@ -4,6 +4,8 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
+#include <cstring>
 #include "cuda_runtime.h"
 #include "NvInfer.h"
 #include "NvInferRuntime.h"
@@ -74,6 +76,10 @@ public:
     ~SAM3_PCS();
     bool infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type);
     bool run_blind_inference();
+    // 实例 engine 使用 VIS_NONE 推理后，通过名称读取原始输出。
+    const float* output_host(const std::string& name) const;
+    bool has_instances() const noexcept { return instance_mask_index >= 0; }
+    int instance_count() const noexcept { return query_count; }
     void pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat);
     const float* semantic_logits_host() const noexcept;
     int semantic_mask_width() const noexcept;
@@ -94,6 +100,9 @@ private:
     int in_width, in_height, opencv_inbytes, opencv_resultbytes;
     int mask_width, mask_height;
     int semantic_output_index = -1;
+    int instance_mask_index = -1;
+    int query_count = 0;
+    cv::Mat pinned_input, pinned_result; // 注册期间持有图像内存
 
     std::vector<void*> input_cpu;
     std::vector<void*> input_gpu;
@@ -103,8 +112,8 @@ private:
     std::vector<size_t>output_sizes;
     std::unique_ptr<float, decltype(&cudaFree)> fixed_prompt_probabilities{nullptr, &cudaFree};
 
-    void* opencv_input; // used only if dGPU
-    uint8_t* gpu_result; // used for both
+    void* opencv_input = nullptr; // used only if dGPU
+    uint8_t* gpu_result = nullptr; // used for both
     uint8_t* zc_input; // used only if iGPU
 
     uint8_t* input_ptr; // placeholder for dGPU/iGPU ptr to pass into kernel

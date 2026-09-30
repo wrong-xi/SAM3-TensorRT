@@ -25,6 +25,10 @@ SAM3_PCS::SAM3_PCS(
 
 void SAM3_PCS::pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat)
 {
+    if (!pinned_input.empty() || input_mat.empty() || input_mat.type() != CV_8UC3 ||
+        !input_mat.isContinuous() || !result_mat.isContinuous() ||
+        input_mat.size() != result_mat.size())
+        throw std::runtime_error("Pin continuous BGR input and matching output once");
     opencv_inbytes = input_mat.total() * input_mat.elemSize();
     opencv_resultbytes = result_mat.total() * result_mat.elemSize();
 
@@ -34,6 +38,7 @@ void SAM3_PCS::pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat)
             cudaHostRegisterDefault),
             " pinning opencv input Mat on host"
         );
+    pinned_input = input_mat;
     // for most purposes the default flag is good enough, in my benchmarking
     // using others say readonly flag did not improve performance
 
@@ -46,6 +51,7 @@ void SAM3_PCS::pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat)
             " pinning opencv result Mat on host"
         );
 
+        pinned_result = result_mat;
         cuda_check(cudaHostGetDevicePointer(
             &zc_input, input_mat.data, 0),
             " getting GPU pointer for input Mat");
@@ -207,6 +213,8 @@ bool SAM3_PCS::infer_on_iGPU(const cv::Mat& input, cv::Mat& result, SAM3_VISUALI
 
 bool SAM3_PCS::infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUALIZATION vis_type)
 {
+    if (has_instances() && vis_type != SAM3_VISUALIZATION::VIS_NONE)
+        throw std::runtime_error("Instance engines require VIS_NONE and instance postprocessing");
     gpu_timings = {};
     if (input.size() != result.size())
     {
@@ -265,7 +273,15 @@ Sam3GpuTimings SAM3_PCS::last_gpu_timings() const noexcept
 
 const float* SAM3_PCS::semantic_logits_host() const noexcept
 {
+    if (semantic_output_index < 0) return nullptr;
     return static_cast<const float*>(output_cpu[semantic_output_index]);
+}
+
+const float* SAM3_PCS::output_host(const std::string& name) const
+{
+    for (size_t i = 0; i < _output_names.size(); ++i)
+        if (_output_names[i] == name) return static_cast<const float*>(output_cpu[i]);
+    throw std::runtime_error("Missing SAM3 output: " + name);
 }
 
 int SAM3_PCS::semantic_mask_width() const noexcept
@@ -439,6 +455,15 @@ void SAM3_PCS::allocate_io_buffers()
                 mask_height = dims.d[2];
                 mask_width = dims.d[3];
             }
+            else if (std::string(name) == "pred_masks")
+            {
+                if (dims.nbDims != 4 || dims.d[0] != 1)
+                    throw std::runtime_error("Expected pred_masks [1,Q,H,W]");
+                instance_mask_index = output_index;
+                query_count = dims.d[1];
+                mask_height = dims.d[2];
+                mask_width = dims.d[3];
+            }
         }
         else
         {
@@ -456,6 +481,19 @@ void SAM3_PCS::allocate_io_buffers()
     {
         throw std::runtime_error(
             "The fixed-prompt engine must have only the pixel_values input");
+    }
+    if (has_instances())
+    {
+        output_host("pred_logits"); output_host("presence_logits"); output_host("pred_boxes");
+        const auto scores = trt_engine->getTensorShape("pred_logits");
+        const auto presence = trt_engine->getTensorShape("presence_logits");
+        const auto boxes = trt_engine->getTensorShape("pred_boxes");
+        if (_output_names.size() != 4 || scores.nbDims != 2 || scores.d[0] != 1 ||
+            scores.d[1] != query_count || presence.nbDims != 2 || presence.d[0] != 1 ||
+            presence.d[1] != 1 || boxes.nbDims != 3 || boxes.d[0] != 1 ||
+            boxes.d[1] != query_count || boxes.d[2] != 4)
+            throw std::runtime_error("Invalid instance output contract");
+        return;
     }
     if (semantic_output_index < 0 || _output_names.size() != 1)
     {
@@ -475,7 +513,7 @@ SAM3_PCS::~SAM3_PCS()
 {
     for (auto& ptr : input_gpu)
     {
-        if (ptr)
+        if (ptr && !is_zerocopy)
         {
             cudaFree(ptr);
         }
@@ -483,9 +521,16 @@ SAM3_PCS::~SAM3_PCS()
 
     for (auto& ptr : output_gpu)
     {
-        if (ptr)
+        if (ptr && !is_zerocopy)
         {
             cudaFree(ptr);
         }
     }
+    // Orin GPU 指针是映射别名，只释放对应的 host allocation。
+    for (auto* ptr : input_cpu) cudaFreeHost(ptr);
+    for (auto* ptr : output_cpu) cudaFreeHost(ptr);
+    if (!pinned_input.empty()) cudaHostUnregister(pinned_input.data);
+    if (!pinned_result.empty()) cudaHostUnregister(pinned_result.data);
+    if (!is_zerocopy) { cudaFree(opencv_input); cudaFree(gpu_result); }
+    cudaStreamDestroy(sam3_stream);
 }

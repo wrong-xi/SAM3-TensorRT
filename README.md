@@ -230,6 +230,36 @@ increase false positives compared with a correctly working gated model.
 
 
 ## Extensions
+
+### 实例 engine：单图检查
+
+新增入口 `sam3_instance_app IMAGE ENGINE NEW_OUTPUT_DIR [CURRENT_FRAME_BINARY_MASK]`。
+实例导出使用 `python python/onnxexport.py --mode instance`。在 Jetson 更新源码后执行：
+
+```bash
+cd /data/code/SAM3-TensorRT
+cmake -S cpp -B cpp/build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build cpp/build --target sam3_instance_app test_instance_selection --parallel 2
+ctest --test-dir cpp/build -R '^instance_selection_cpu$' --output-on-failure
+mkdir -p /data/code/jetson-handle-vision/_artifacts
+export SAM3_INSTANCE_RUN_DIR="$(mktemp -d /data/code/jetson-handle-vision/_artifacts/sam3-instance-run.XXXXXX)"
+set -o pipefail
+# 替换为实际图片；results 子目录必须尚不存在。
+./cpp/build/sam3_instance_app \
+  /data/images/0914/实际图片文件名.png \
+  /data/models/sam3-instance/sam3_672_handle_instance_fp16.engine \
+  "$SAM3_INSTANCE_RUN_DIR/results" \
+  2>&1 | tee "$SAM3_INSTANCE_RUN_DIR/run.log"
+```
+
+输出包括每个通过阈值的 `query_N.png`（二值 0/255）和 `instances.tsv`。
+仅选择成功时保存 `selected.png`。`reason` 包括 `selected`、`no_target`、
+`ambiguous_targets`、`target_association_failed`，后三种是业务结果。
+可追加同一帧的二值参考 mask 路径做 IoU 关联，禁止传入 128/255 语义类别图。
+分数是候选和 presence 的 sigmoid 乘积，严格大于 0.6 才保留；mask 先插值
+logits 再按大于 0 判前景。无参考要求唯一候选，有参考要求最大 IoU 至少为 0.2。
+首版后处理在 CPU 上运行，仅放大合格候选；单次推理不作为性能基准。
+输入预处理仍沿用 CUDA 整数采样，尚未证明与 v11 端到端数值等价，未接 Cutie/FP。
 This is a very raw project and provides the crucial backend TensorRT/CUDA bits necessary for anything. From here, please feel free to fan out into any application you like. Pull requests are very welcome! Here are some ideas I can think of:
 - ROS2 wrapper for real-time robotics pipelines.
 - Interactive voice-based segmentation app. Have someone speak into a microphone, use a TTS model to transcribe it and feed into the engine, which then produces the segmentation mask live. I don't have the time to build it but I hope you can.

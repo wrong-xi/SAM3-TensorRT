@@ -4,6 +4,7 @@ set(CMAKE_CUDA_COMPILER
 )
 
 project(sam3_trt LANGUAGES CXX CUDA)
+include(CTest)
 
 add_compile_options(-std=c++17)
 set(CUDA_NVCC_FLAGS ${CUDA_NVCC_FLAGS}; -O3)
@@ -56,3 +57,12 @@ target_link_libraries(
            pthread
            stdc++fs
 )
+
+add_executable(sam3_instance_app src/sam3/sam3_apps/sam3_instance_app.cpp)
+target_link_libraries(sam3_instance_app PRIVATE sam3_trt ${OpenCV_LIBRARIES})
+
+if(BUILD_TESTING)
+    add_executable(test_instance_selection tests/test_instance_selection.cpp)
+    target_link_libraries(test_instance_selection PRIVATE ${OpenCV_LIBRARIES})
+    add_test(NAME instance_selection_cpu COMMAND test_instance_selection)
+endif()
