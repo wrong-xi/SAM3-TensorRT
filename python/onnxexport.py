@@ -83,9 +83,43 @@ def _static_squeeze(g, value, dim=None):
     return symbolic_opset11.squeeze(g, value, dim)
 
 
+class ConvPresenceHead(torch.nn.Module):
+    """用等价的 1×1 Conv 导出 presence MLP，绕过 TRT 10.3 数值异常。"""
+
+    def __init__(self, head: torch.nn.Module) -> None:
+        super().__init__()
+        self.head = head
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        # 每个 token 独立计算；Linear 的 [out, in] 权重只增加卷积核维度。
+        output = features.reshape(-1, features.shape[-1], 1)
+        layers = (self.head.layer1, self.head.layer2, self.head.layer3)
+        for index, layer in enumerate(layers):
+            output = torch.nn.functional.conv1d(
+                output, layer.weight.unsqueeze(-1), layer.bias,
+            )
+            if index < 2:
+                output = torch.nn.functional.relu(output)
+        return output.reshape(*features.shape[:-1], output.shape[1])
+
+
+@torch.no_grad()
 def export_onnx(wrapper, pixel_values, onnx_path):
+    decoder = wrapper.sam3.detr_decoder
+    original_head = decoder.presence_head
     torch.onnx.register_custom_op_symbolic("aten::squeeze", _static_squeeze, 17)
     try:
+        if wrapper.output_mode == "instance":
+            reference = wrapper(pixel_values)
+            decoder.presence_head = ConvPresenceHead(original_head).eval()
+            for name, actual, expected in zip(
+                wrapper.output_names, wrapper(pixel_values), reference
+            ):
+                torch.testing.assert_close(
+                    actual, expected, rtol=1e-3, atol=1e-3,
+                    msg=lambda msg, name=name: f"Conv presence changes {name}: {msg}",
+                )
+            print("Conv presence head matches the original model outputs.")
         torch.onnx.export(
             wrapper,
             (pixel_values,),
@@ -96,6 +130,7 @@ def export_onnx(wrapper, pixel_values, onnx_path):
             opset_version=17,
         )
     finally:
+        decoder.presence_head = original_head
         torch.onnx.unregister_custom_op_symbolic("aten::squeeze", 17)
 
 
