@@ -80,6 +80,7 @@ public:
     const float* output_host(const std::string& name) const;
     bool has_instances() const noexcept { return instance_mask_index >= 0; }
     int instance_count() const noexcept { return query_count; }
+    int semantic_classes() const noexcept { return semantic_class_count; }
     void pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat);
     const float* semantic_logits_host() const noexcept;
     int semantic_mask_width() const noexcept;
@@ -100,6 +101,7 @@ private:
     int in_width, in_height, opencv_inbytes, opencv_resultbytes;
     int mask_width, mask_height;
     int semantic_output_index = -1;
+    int semantic_class_count = 0;
     int instance_mask_index = -1;
     int query_count = 0;
     cv::Mat pinned_input, pinned_result; // 注册期间持有图像内存

@@ -215,6 +215,8 @@ bool SAM3_PCS::infer_on_image(const cv::Mat& input, cv::Mat& result, SAM3_VISUAL
 {
     if (has_instances() && vis_type != SAM3_VISUALIZATION::VIS_NONE)
         throw std::runtime_error("Instance engines require VIS_NONE and instance postprocessing");
+    if (semantic_class_count == 2 && vis_type != SAM3_VISUALIZATION::VIS_NONE)
+        throw std::runtime_error("Dual semantic engines require VIS_NONE and caller postprocessing");
     gpu_timings = {};
     if (input.size() != result.size())
     {
@@ -446,12 +448,13 @@ void SAM3_PCS::allocate_io_buffers()
 
             if (std::string(name) == "semantic_logits")
             {
-                if (dims.nbDims != 4 || dims.d[0] != 1 || dims.d[1] != 1)
+                if (dims.nbDims != 4 || (dims.d[0] != 1 && dims.d[0] != 2) || dims.d[1] != 1)
                 {
                     throw std::runtime_error(
-                        "The single-class door handle engine requires semantic_logits [1, 1, H, W]");
+                        "Expected semantic_logits [C,1,H,W], C=1 or 2");
                 }
                 semantic_output_index = output_index;
+                semantic_class_count = dims.d[0];
                 mask_height = dims.d[2];
                 mask_width = dims.d[3];
             }
@@ -493,6 +496,15 @@ void SAM3_PCS::allocate_io_buffers()
             presence.d[1] != 1 || boxes.nbDims != 3 || boxes.d[0] != 1 ||
             boxes.d[1] != query_count || boxes.d[2] != 4)
             throw std::runtime_error("Invalid instance output contract");
+        return;
+    }
+    if (semantic_output_index >= 0 && semantic_class_count == 2)
+    {
+        // 旧door/door handle双类别engine只读原始输出，由调用方解码；不使用单类可视化核。
+        output_host("presence_logits");
+        const auto presence = trt_engine->getTensorShape("presence_logits");
+        if (_output_names.size() != 2 || presence.nbDims != 2 || presence.d[0] != 2 || presence.d[1] != 1)
+            throw std::runtime_error("Dual semantic engine requires presence_logits [2,1]");
         return;
     }
     if (semantic_output_index < 0 || _output_names.size() != 1)
