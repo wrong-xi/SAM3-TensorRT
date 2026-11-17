@@ -34,8 +34,9 @@ int main(int argc, char** argv)
         if (!model.infer_on_image(input, scratch, SAM3_VISUALIZATION::VIS_NONE))
             throw std::runtime_error("SAM3 inference failed");
         // 保留筛选前分数，区分 presence 抑制与候选自身分数低。
-        const auto* logits = model.output_host("pred_logits");
-        const float presence = model.output_host("presence_logits")[0];
+        const int handle_class = model.instance_classes() - 1;
+        const auto* logits = model.output_host("pred_logits") + handle_class * model.instance_count();
+        const float presence = model.output_host("presence_logits")[handle_class];
         if (!std::isfinite(presence)) throw std::runtime_error("Non-finite presence");
         std::vector<int> order(model.instance_count());
         std::iota(order.begin(), order.end(), 0);
@@ -46,9 +47,9 @@ int main(int argc, char** argv)
         std::cout << std::setprecision(9) << "presence_logit=" << presence << '\n';
         for (std::size_t i = 0; i < std::min<std::size_t>(5, order.size()); ++i)
             std::cout << "top_query=" << order[i] << " pred_logit=" << logits[order[i]] << '\n';
-        const auto instances = decode_instances(model.output_host("pred_masks"),
-            model.output_host("pred_logits"), model.output_host("presence_logits")[0],
-            model.output_host("pred_boxes"), model.instance_count(),
+        const auto instances = decode_instance_class(model.output_host("pred_masks"),
+            model.output_host("pred_logits"), model.output_host("presence_logits"),
+            model.output_host("pred_boxes"), model.instance_classes(), handle_class, model.instance_count(),
             model.semantic_mask_width(), model.semantic_mask_height(), input.size());
         const auto selected = select_instance(instances, reference);
         std::filesystem::create_directories(output);

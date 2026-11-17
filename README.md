@@ -363,3 +363,12 @@ If this saved you time, drop a ⭐ so others can find it and ship SAM-3 faster.
 
 # Disclaimer
 All views expressed here are my own. This project is not affiliated with my employer.
+
+
+## 本分支：door + door handle 双类别实例
+
+`codex/door-handle-instances`复用一次图像编码，按固定door、door handle顺序独立解码并拼接四个实例输出。`python/onnxexport.py --mode instance --classes door-handle --model-dir <HF目录> --image <样例图> --output-dir <新目录>`导出ONNX、类别契约及数值检查参考。原单类导出默认不变。
+
+C++支持C=1或C=2的`pred_masks[C,Q,H,W]`、`pred_logits[C,Q]`、`presence_logits[C,1]`、`pred_boxes[C,Q,4]`。新增类别维后必须重建库及调用程序；`sam3_instance_app`仍检查把手（最后一类），两类输出由jetson-handle-vision的sam3_backend读取。不能用旧语义engine代替实例engine。
+
+完整PC导出、Jetson构建、数值检查、A/B及回传步骤在配套jetson-handle-vision分支的`docs/SAM3_DUAL_INSTANCE.md`，避免维护第二套运行脚本。

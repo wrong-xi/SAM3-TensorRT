@@ -460,8 +460,9 @@ void SAM3_PCS::allocate_io_buffers()
             }
             else if (std::string(name) == "pred_masks")
             {
-                if (dims.nbDims != 4 || dims.d[0] != 1)
-                    throw std::runtime_error("Expected pred_masks [1,Q,H,W]");
+                if (dims.nbDims != 4 || (dims.d[0] != 1 && dims.d[0] != 2))
+                    throw std::runtime_error("Expected pred_masks [C,Q,H,W], C=1 or 2");
+                instance_class_count = dims.d[0];
                 instance_mask_index = output_index;
                 query_count = dims.d[1];
                 mask_height = dims.d[2];
@@ -491,9 +492,9 @@ void SAM3_PCS::allocate_io_buffers()
         const auto scores = trt_engine->getTensorShape("pred_logits");
         const auto presence = trt_engine->getTensorShape("presence_logits");
         const auto boxes = trt_engine->getTensorShape("pred_boxes");
-        if (_output_names.size() != 4 || scores.nbDims != 2 || scores.d[0] != 1 ||
-            scores.d[1] != query_count || presence.nbDims != 2 || presence.d[0] != 1 ||
-            presence.d[1] != 1 || boxes.nbDims != 3 || boxes.d[0] != 1 ||
+        if (_output_names.size() != 4 || scores.nbDims != 2 || scores.d[0] != instance_class_count ||
+            scores.d[1] != query_count || presence.nbDims != 2 || presence.d[0] != instance_class_count ||
+            presence.d[1] != 1 || boxes.nbDims != 3 || boxes.d[0] != instance_class_count ||
             boxes.d[1] != query_count || boxes.d[2] != 4)
             throw std::runtime_error("Invalid instance output contract");
         return;

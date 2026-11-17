@@ -36,6 +36,27 @@ int main()
         check(select_instance(edge, five, 0.21).index == -1);
         edge.push_back(edge[0]);
         check(select_instance(edge, five).index == 0); // IoU 相同保留首个候选
+        // 两类使用不同 mask/分数/presence/box，任何一处偏移错位都应被发现。
+        const float class_masks[] = {2,-2,-2,-2, -2,-2,-2,2};
+        const float class_scores[] = {2,10}, class_presence[] = {10,2};
+        const float class_boxes[] = {0,0,.5F,.5F, .5F,.5F,1,1};
+        auto door = decode_instance_class(class_masks,class_scores,class_presence,class_boxes,
+            2,0,1,2,2,{2,2});
+        auto handle = decode_instance_class(class_masks,class_scores,class_presence,class_boxes,
+            2,1,1,2,2,{2,2});
+        check(door.size() == 1 && handle.size() == 1);
+        check(door[0].mask.at<unsigned char>(0,0) == 255);
+        check(handle[0].mask.at<unsigned char>(1,1) == 255);
+        check(door[0].box[2] == 1 && handle[0].box[0] == 1);
+        const float presence_off[] = {-10,10};
+        check(decode_instance_class(class_masks,class_scores,presence_off,class_boxes,
+            2,0,1,2,2,{2,2}).empty());
+        check(decode_instance_class(class_masks,class_scores,presence_off,class_boxes,
+            2,1,1,2,2,{2,2}).size() == 1);
+        bool rejected = false;
+        try { decode_instance_class(class_masks,class_scores,class_presence,class_boxes,
+            2,2,1,2,2,{2,2}); } catch (const std::runtime_error&) { rejected = true; }
+        check(rejected);
         std::cout << "instance selection tests passed\n";
         return 0;
     }

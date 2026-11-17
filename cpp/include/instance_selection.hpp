@@ -54,6 +54,19 @@ inline std::vector<Sam3Instance> decode_instances(const float* masks,
     return result;
 }
 
+// 仅在这里计算类间偏移，避免把 door 的 presence/box 与 handle 的 mask 混用。
+inline std::vector<Sam3Instance> decode_instance_class(const float* masks,
+    const float* logits, const float* presence, const float* boxes, int classes,
+    int class_index, int count, int width, int height, cv::Size size)
+{
+    if (!masks || !logits || !presence || !boxes || count <= 0 || width <= 0 || height <= 0 ||
+        (classes != 1 && classes != 2) || class_index < 0 || class_index >= classes)
+        throw std::runtime_error("Invalid instance class");
+    const auto offset = static_cast<std::size_t>(class_index) * count;
+    return decode_instances(masks + offset * width * height, logits + offset,
+        presence[class_index], boxes + offset * 4, count, width, height, size);
+}
+
 // reference 必须来自当前帧；没有参考时不按面积或分数擅自选择多个候选。
 inline Sam3Selection select_instance(const std::vector<Sam3Instance>& instances,
     const cv::Mat& reference = {}, double min_iou = 0.2)

@@ -80,6 +80,8 @@ public:
     const float* output_host(const std::string& name) const;
     bool has_instances() const noexcept { return instance_mask_index >= 0; }
     int instance_count() const noexcept { return query_count; }
+    // C=1: handle；C=2: door、door handle，类内 query 数相同。
+    int instance_classes() const noexcept { return instance_class_count; }
     int semantic_classes() const noexcept { return semantic_class_count; }
     void pin_opencv_matrices(cv::Mat& input_mat, cv::Mat& result_mat);
     const float* semantic_logits_host() const noexcept;
@@ -104,6 +106,7 @@ private:
     int semantic_class_count = 0;
     int instance_mask_index = -1;
     int query_count = 0;
+    int instance_class_count = 0;
     cv::Mat pinned_input, pinned_result; // 注册期间持有图像内存
 
     std::vector<void*> input_cpu;
