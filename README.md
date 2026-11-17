@@ -371,4 +371,6 @@ All views expressed here are my own. This project is not affiliated with my empl
 
 C++支持C=1或C=2的`pred_masks[C,Q,H,W]`、`pred_logits[C,Q]`、`presence_logits[C,1]`、`pred_boxes[C,Q,4]`。新增类别维后必须重建库及调用程序；`sam3_instance_app`仍检查把手（最后一类），两类输出由jetson-handle-vision的sam3_backend读取。不能用旧语义engine代替实例engine。
 
-完整PC导出、Jetson构建、数值检查、A/B及回传步骤在配套jetson-handle-vision分支的`docs/SAM3_DUAL_INSTANCE.md`，避免维护第二套运行脚本。
+现行构建、模型准备和参数见配套jetson-handle-vision的`docs/DEPLOYMENT_PLAN.md`，双类别接口见`docs/ALGORITHM_NOTES.md`。历史A/B与排错记录位于该仓库`docs/history/SAM3_DUAL_INSTANCE.md`，不作为日常操作入口。
+
+`_artifacts/`为本机ONNX导出及参考输入，不进入Git或源码交付。部署运行直接使用已验收engine。

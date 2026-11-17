@@ -19,3 +19,6 @@ cpp/tests/*
 !cpp/tests/test_instance_selection.cpp
 python/test_fixed_prompt_wrapper.py
 python/test_onnx_tensorrt_fix.py
+
+# 本机模型导出、数值参考与临时结果不进入源码交付。
+/_artifacts/
